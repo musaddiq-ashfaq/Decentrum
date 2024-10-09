@@ -1,0 +1,9 @@
+# Go build files
+*.exe
+*.exe~
+*.out
+*.test
+
+# Go workspace
+go.sum
+vendor/

@@ -1,0 +1,70 @@
+.user-feed-container {
+    width: 80%;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.new-post-form {
+    margin-bottom: 20px;
+}
+
+.new-post-form textarea {
+    width: 100%;
+    height: 80px;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+.submit-button {
+    margin-top: 10px;
+    padding: 10px 15px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.submit-button:hover {
+    background-color: #0056b3;
+}
+
+.posts-container {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+
+
+.post-card {
+    position: relative; /* Required for positioning child elements */
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+.reactions {
+    position: relative; /* Position for absolute children */
+}
+
+.reaction-options {
+    display: none; /* Initially hidden */
+    position: absolute; /* Position options relative to reactions container */
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 5px;
+    z-index: 10; /* Ensure it's above other elements */
+}
+
+.reactions:hover .reaction-options {
+    display: block; /* Show on hover */
+}
+
+.reaction-button {
+    margin: 0 5px;
+    cursor: pointer;
+}
