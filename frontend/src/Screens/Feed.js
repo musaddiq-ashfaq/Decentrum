@@ -37,7 +37,17 @@ const UserFeed = () => {
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ content: newPost }),
+                body: JSON.stringify({
+                    user: {
+                      name: "bilal",  // Replace with dynamic user info if needed
+                      email: "bilalsaleem745@gmail.com"
+                    },
+                    content: newPost,
+                    reactions: {
+                      likes: "0" // Default value, can be updated dynamically
+                    },
+                    reactionCount: 0
+                  }),
             });
 
             if (response.ok) {
@@ -46,6 +56,8 @@ const UserFeed = () => {
                 setNewPost(''); // Clear the input field
             } else {
                 console.error('Failed to create post', response.status);
+                const errorResponse = await response.json();
+                console.error('Failed to create post', response.status, errorResponse);
             }
         } catch (error) {
             console.error('Error creating post:', error);

@@ -13,10 +13,12 @@ const LoginPage = () => {
       const response = await fetch('http://localhost:8081/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify({ email, password }),
       });
 
       if (response.ok) {
+        const data = await response.json();  // Parse response into JSON
+        localStorage.setItem('user', JSON.stringify(data.user)); // Store user data in localStorage
         navigate('/feed'); // Redirect to feed on successful login
       } else if (response.status === 401) {
         setError('Wrong credentials. Please try again.');
