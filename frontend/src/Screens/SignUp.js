@@ -4,10 +4,10 @@ import './RegistrationPage.css';
 
 const RegistrationPage = () => {
   const [formData, setFormData] = useState({
-    // name: '',
+    name: '',
     email: '',
     password: '',
-    // phone: '',
+    phone: '',
     // documents: null,
   });
 
@@ -24,7 +24,9 @@ const RegistrationPage = () => {
     e.preventDefault();
 
     const user = {
+      name: formData.name,
       email: formData.email,
+      phone: formData.phone,
       password: formData.password,
     };
 
@@ -54,7 +56,7 @@ const RegistrationPage = () => {
       <div className="form-container">
         <h1 className="header">Create Account</h1>
         <form onSubmit={handleSubmit}>
-          {/* <div>
+          {<div>
             <label htmlFor="name" className="label">Name</label>
             <input
               id="name"
@@ -66,7 +68,7 @@ const RegistrationPage = () => {
               value={formData.name}
               onChange={handleChange}
             />
-          </div> */}
+          </div>}
           <div>
             <label htmlFor="email" className="label">Email</label>
             <input
@@ -80,7 +82,7 @@ const RegistrationPage = () => {
               onChange={handleChange}
             />
           </div>
-          {/* <div>
+          {<div>
             <label htmlFor="phone" className="label">Phone</label>
             <input
               id="phone"
@@ -92,7 +94,7 @@ const RegistrationPage = () => {
               value={formData.phone}
               onChange={handleChange}
             />
-          </div> */}
+          </div>}
           <div>
             <label htmlFor="password" className="label">Password</label>
             <input
