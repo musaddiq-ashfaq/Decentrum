@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
@@ -124,6 +125,22 @@ func (s *SmartContract) CreatePost(ctx contractapi.TransactionContextInterface, 
 		return fmt.Errorf("failed to update posts: %v", err)
 	}
 
+	// Create a separate key for all posts (for easier retrieval in GetAllPosts)
+	allPostsKey, err := ctx.GetStub().CreateCompositeKey("allposts", []string{ipfsHash})
+	if err != nil {
+		return fmt.Errorf("failed to create all posts composite key: %v", err)
+	}
+
+	// Store the post under the all posts key
+	err = ctx.GetStub().PutState(allPostsKey, []byte(email))
+	if err != nil {
+		return fmt.Errorf("failed to store post in all posts: %v", err)
+	}
+
+	// Log the creation of the post
+	log.Printf("Created post for user %s with IPFS hash: %s", email, ipfsHash)
+	log.Printf("Stored post with composite key: %s", allPostsKey)
+
 	return nil
 }
 
@@ -143,6 +160,47 @@ func (s *SmartContract) GetPost(ctx contractapi.TransactionContextInterface, pos
 		return nil, err
 	}
 	return &post, nil
+}
+
+func (s *SmartContract) GetAllPosts(ctx contractapi.TransactionContextInterface) (string, error) {
+	resultsIterator, err := ctx.GetStub().GetStateByPartialCompositeKey("allposts", []string{})
+	if err != nil {
+		log.Printf("Failed to get iterator for all posts: %v", err)
+		return "[]", fmt.Errorf("failed to get all posts: %v", err)
+	}
+	defer resultsIterator.Close()
+
+	var posts []string
+	for resultsIterator.HasNext() {
+		queryResponse, err := resultsIterator.Next()
+		if err != nil {
+			log.Printf("Failed to get next item from iterator: %v", err)
+			return "[]", fmt.Errorf("failed to iterate posts: %v", err)
+		}
+
+		_, compositeKeyParts, err := ctx.GetStub().SplitCompositeKey(queryResponse.Key)
+		if err != nil {
+			log.Printf("Failed to split composite key: %v", err)
+			continue
+		}
+
+		if len(compositeKeyParts) > 0 {
+			posts = append(posts, compositeKeyParts[0])
+			log.Printf("Added post with IPFS hash: %s", compositeKeyParts[0])
+		}
+	}
+
+	// Ensure we always return a valid JSON array, even if it's empty
+	jsonPosts, err := json.Marshal(posts)
+	if err != nil {
+		log.Printf("Failed to marshal posts: %v", err)
+		return "[]", fmt.Errorf("failed to marshal posts: %v", err)
+	}
+
+	log.Printf("Retrieved %d posts", len(posts))
+	log.Printf("Returning JSON: %s", string(jsonPosts))
+
+	return string(jsonPosts), nil
 }
 
 // AddReaction allows a user to react to a post

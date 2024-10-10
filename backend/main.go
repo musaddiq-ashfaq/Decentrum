@@ -497,6 +497,48 @@ func PostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func FeedHandler(w http.ResponseWriter, r *http.Request) {
+	// Fetch all post hashes from the blockchain
+	result, err := contract.EvaluateTransaction("GetAllPosts")
+	if err != nil {
+		log.Printf("Error calling GetAllPosts: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to fetch posts: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Raw result from GetAllPosts: %s", string(result))
+
+	if len(result) == 0 || string(result) == "null" {
+		log.Println("GetAllPosts returned null or empty result")
+		json.NewEncoder(w).Encode([]Post{})
+		return
+	}
+
+	var postHashes []string
+	if err := json.Unmarshal(result, &postHashes); err != nil {
+		log.Printf("Error unmarshalling post hashes: %v", err)
+		http.Error(w, "Failed to parse post data.", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Unmarshalled %d post hashes", len(postHashes))
+
+	var posts []Post
+	for _, hash := range postHashes {
+		post, err := getPostFromIPFS(hash)
+		if err != nil {
+			log.Printf("Failed to fetch post from IPFS: %v", err)
+			continue
+		}
+		posts = append(posts, *post)
+	}
+
+	log.Printf("Retrieved %d posts from IPFS", len(posts))
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(posts)
+}
+
 func submitPostWithRetry(email string, ipfsHash string) ([]byte, error) {
 	maxRetries := 4
 	var lastErr error
@@ -598,7 +640,8 @@ func main() {
 	router := mux.NewRouter()
 	router.HandleFunc("/signup", SignUpHandler).Methods(http.MethodPost)
 	router.HandleFunc("/login", LoginHandler).Methods(http.MethodPost)
-	router.HandleFunc("/feed", PostHandler).Methods(http.MethodPost, http.MethodGet)
+	router.HandleFunc("/post", PostHandler).Methods(http.MethodPost, http.MethodGet)
+	router.HandleFunc("/feed", FeedHandler).Methods(http.MethodGet)
 
 	// Configure CORS
 	corsHandler := cors.New(cors.Options{
