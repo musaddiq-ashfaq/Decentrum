@@ -1,33 +1,39 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 const LoginPage = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError(""); // Clear any existing errors
+
     try {
-      const response = await fetch('http://localhost:8081/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("http://localhost:8081/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
 
+      const data = await response.json();
+
       if (response.ok) {
-        const data = await response.json();  // Parse response into JSON
-        localStorage.setItem('user', JSON.stringify(data.user)); // Store user data in localStorage
-        navigate('/feed'); // Redirect to feed on successful login
-      } else if (response.status === 401) {
-        setError('Wrong credentials. Please try again.');
+        if (data.user) {
+          // Store user data in localStorage
+          localStorage.setItem("user", JSON.stringify(data.user));
+          navigate("/feed");
+        } else {
+          setError("Login successful but user data is missing");
+        }
       } else {
-        setError('An error occurred. Please try again later.');
+        setError(data.message || "Wrong credentials. Please try again.");
       }
     } catch (error) {
-      console.error('Error during login:', error);
-      setError('Failed to log in.');
+      console.error("Error during login:", error);
+      setError("Failed to log in. Please check your connection and try again.");
     }
   };
 
@@ -37,7 +43,9 @@ const LoginPage = () => {
         <h1 className="header">Facebook</h1>
         <form onSubmit={handleSubmit}>
           <div>
-            <label htmlFor="email" className="label">Email or Phone</label>
+            <label htmlFor="email" className="label">
+              Email or Phone
+            </label>
             <input
               id="email"
               type="text"
@@ -49,7 +57,9 @@ const LoginPage = () => {
             />
           </div>
           <div>
-            <label htmlFor="password" className="label">Password</label>
+            <label htmlFor="password" className="label">
+              Password
+            </label>
             <input
               id="password"
               type="password"
@@ -61,18 +71,20 @@ const LoginPage = () => {
             />
           </div>
           {error && <p className="error">{error}</p>}
-          <button
-            type="submit"
-            className="submit-button"
-          >
+          <button type="submit" className="submit-button">
             Log In
           </button>
         </form>
         <div className="forgot-password">
-          <a href="/forgot-password" className="link">Forgot Password?</a>
+          <a href="/forgot-password" className="link">
+            Forgot Password?
+          </a>
         </div>
         <p className="signup-text">
-          Don't have an account? <a href="/signup" className="link">Sign up</a>
+          Don't have an account?{" "}
+          <a href="/signup" className="link">
+            Sign up
+          </a>
         </p>
       </div>
     </div>

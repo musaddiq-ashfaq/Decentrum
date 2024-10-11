@@ -13,12 +13,21 @@ type SmartContract struct {
 }
 
 // User represents a user profile
+// type User struct {
+// 	Name           string `json:"name"`
+// 	Email          string `json:"email"`
+// 	Phone          string `json:"phone"`
+// 	Password       string `json:"password"`
+// 	ProfilePicture string `json:"profilePicture,omitempty"`
+// 	DataCID        string `json:"dataCID"`
+// }
+
 type User struct {
 	Name           string `json:"name"`
 	Email          string `json:"email"`
 	Phone          string `json:"phone"`
 	Password       string `json:"password"`
-	ProfilePicture string `json:"profilePicture,omitempty"`
+	ProfilePicture string `json:"profilePicture"`
 	DataCID        string `json:"dataCID"`
 }
 
@@ -32,7 +41,28 @@ type Post struct {
 }
 
 // CreateUser creates a new user profile
-func (s *SmartContract) CreateUser(ctx contractapi.TransactionContextInterface, email string, dataCID string) error {
+// func (s *SmartContract) CreateUser(ctx contractapi.TransactionContextInterface, email string, dataCID string) error {
+// 	exists, err := s.UserExists(ctx, email)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	if exists {
+// 		return fmt.Errorf("user already exists: %s", email)
+// 	}
+
+// 	user := User{
+// 		Email:   email,
+// 		DataCID: dataCID,
+// 	}
+// 	userJSON, err := json.Marshal(user)
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	return ctx.GetStub().PutState(email, userJSON)
+// }
+
+func (s *SmartContract) CreateUser(ctx contractapi.TransactionContextInterface, email, hashedPassword, name, ipfsHash string) error {
 	exists, err := s.UserExists(ctx, email)
 	if err != nil {
 		return err
@@ -42,15 +72,26 @@ func (s *SmartContract) CreateUser(ctx contractapi.TransactionContextInterface, 
 	}
 
 	user := User{
-		Email:   email,
-		DataCID: dataCID,
+		Email:          email,
+		Password:       hashedPassword,
+		Name:           name,
+		DataCID:        ipfsHash,
+		ProfilePicture: "", // Add a default empty string for ProfilePicture
 	}
 	userJSON, err := json.Marshal(user)
 	if err != nil {
 		return err
 	}
 
-	return ctx.GetStub().PutState(email, userJSON)
+	fmt.Printf("Creating user with email: %s, hashedPassword: %s\n", email, hashedPassword)
+	err = ctx.GetStub().PutState(email, userJSON)
+	if err != nil {
+		fmt.Printf("Failed to put user state: %v\n", err)
+		return err
+	}
+	fmt.Printf("User created successfully\n")
+
+	return nil
 }
 
 // UserExists checks if a user exists by email
@@ -63,6 +104,23 @@ func (s *SmartContract) UserExists(ctx contractapi.TransactionContextInterface, 
 }
 
 // GetUser retrieves a user profile by email
+// func (s *SmartContract) GetUser(ctx contractapi.TransactionContextInterface, email string) (*User, error) {
+// 	userJSON, err := ctx.GetStub().GetState(email)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to read from world state: %v", err)
+// 	}
+// 	if userJSON == nil {
+// 		return nil, fmt.Errorf("user does not exist: %s", email)
+// 	}
+
+// 	var user User
+// 	err = json.Unmarshal(userJSON, &user)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return &user, nil
+// }
+
 func (s *SmartContract) GetUser(ctx contractapi.TransactionContextInterface, email string) (*User, error) {
 	userJSON, err := ctx.GetStub().GetState(email)
 	if err != nil {
@@ -77,10 +135,41 @@ func (s *SmartContract) GetUser(ctx contractapi.TransactionContextInterface, ema
 	if err != nil {
 		return nil, err
 	}
+
+	// Clear sensitive data before returning
+	user.Password = ""
+
 	return &user, nil
 }
 
-// In your chaincode file (e.g., chaincode/social_media/social_media.go)
+func (s *SmartContract) VerifyUserCredentials(ctx contractapi.TransactionContextInterface, email, hashedPassword string) (bool, error) {
+	fmt.Printf("Verifying credentials for email: %s, hashedPassword: %s\n", email, hashedPassword)
+
+	userJSON, err := ctx.GetStub().GetState(email)
+	if err != nil {
+		fmt.Printf("Failed to read from world state: %v\n", err)
+		return false, fmt.Errorf("failed to read from world state: %v", err)
+	}
+	if userJSON == nil {
+		fmt.Printf("User not found for email: %s\n", email)
+		return false, nil
+	}
+
+	var user User
+	err = json.Unmarshal(userJSON, &user)
+	if err != nil {
+		fmt.Printf("Failed to unmarshal user data: %v\n", err)
+		return false, err
+	}
+
+	fmt.Printf("Stored hashed password: %s\n", user.Password)
+	fmt.Printf("Provided hashed password: %s\n", hashedPassword)
+
+	isValid := user.Password == hashedPassword
+	fmt.Printf("Credentials valid: %v\n", isValid)
+
+	return isValid, nil
+}
 
 // CreatePost creates a new post for a user
 func (s *SmartContract) CreatePost(ctx contractapi.TransactionContextInterface, email string, ipfsHash string) error {
