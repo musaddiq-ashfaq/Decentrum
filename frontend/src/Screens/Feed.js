@@ -48,7 +48,7 @@ const UserFeed = () => {
     };
 
     const handleShareWithUser = (user) => {
-        alert(`Post shared with ${user.name} (Email: ${user.email})`);
+        alert(`Post shared with ${user.name}`);
         setShowSharePopup(false);
     };
 

@@ -51,3 +51,94 @@ h1 {
 .reaction-button:hover, .share-button:hover {
     background-color: #e0e0e0;
 }
+
+/* New styles for the popup */
+/* Popup container styling remains the same */
+.share-popup {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+    width: 300px;
+    max-height: 400px;
+    overflow-y: auto;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -60%);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%);
+    }
+}
+
+.share-popup h3 {
+    margin: 0 0 15px 0;
+    text-align: center;
+    color: #444;
+    font-size: 18px;
+}
+
+.user-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.user-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    background-color: #f9f9f9;
+    border-radius: 5px;
+    transition: background-color 0.2s;
+}
+
+.user-item:hover {
+    background-color: #f1f1f1;
+}
+
+.user-item span {
+    color: #555;
+}
+
+.user-item button {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+    margin-left: auto; /* Moves share button towards the right */
+}
+
+.user-item button:hover {
+    background-color: #0056b3;
+}
+
+/* Center the close button */
+.share-popup .close-button {
+    display: block;
+    margin: 15px auto 0; /* Centering the close button */
+    background-color: #ff4d4d;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.share-popup .close-button:hover {
+    background-color: #e60000;
+}
