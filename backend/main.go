@@ -498,6 +498,26 @@ func GetUserData(email string) (*User, error) {
 	return &user, nil
 }
 
+func GetAllUsersHandler(w http.ResponseWriter, r *http.Request) {
+	result, err := contract.EvaluateTransaction("GetAllUsers")
+	if err != nil {
+		log.Printf("Failed to get all users: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to get all users: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var users []*User
+	err = json.Unmarshal(result, &users)
+	if err != nil {
+		log.Printf("Failed to unmarshal users: %v", err)
+		http.Error(w, "Failed to parse user data.", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(users)
+}
+
 func PostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
@@ -752,6 +772,7 @@ func main() {
 	router.HandleFunc("/login", LoginHandler).Methods(http.MethodPost)
 	router.HandleFunc("/post", PostHandler).Methods(http.MethodPost, http.MethodGet)
 	router.HandleFunc("/feed", FeedHandler).Methods(http.MethodGet)
+	router.HandleFunc("/users", GetAllUsersHandler).Methods(http.MethodGet)
 
 	// Configure CORS
 	corsHandler := cors.New(cors.Options{

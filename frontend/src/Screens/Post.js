@@ -172,48 +172,6 @@ const UserPost = () => {
       ) : (
         <p> Please login to create post</p>
       )}
-      <div className="posts-container">
-        {posts.map((post) => (
-          <div key={post.id} className="post-card">
-            <p>{post.content}</p>
-            <div className="reactions">
-              <span
-                className="reaction-button"
-                onClick={() => handleReaction(post.id, "like")}
-              >
-                👍
-              </span>
-              <div className="reaction-options">
-                <button
-                  className="reaction-button"
-                  onClick={() => handleReaction(post.id, "like")}
-                >
-                  👍 Like
-                </button>
-                <button
-                  className="reaction-button"
-                  onClick={() => handleReaction(post.id, "love")}
-                >
-                  ❤️ Love
-                </button>
-                {/* Add more reaction options here if needed */}
-              </div>
-              <span>{post.reactions ? post.reactions.join(", ") : ""}</span>
-              <span className="reaction-count">
-                {` (${post.reactionCount || 0} ${
-                  post.reactionCount === 1 ? "reaction" : "reactions"
-                })`}
-              </span>
-            </div>
-            <button
-              onClick={() => handleShare(post.id)}
-              className="share-button"
-            >
-              Share
-            </button>
-          </div>
-        ))}
-      </div>
     </div>
   );
 };

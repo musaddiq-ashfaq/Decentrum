@@ -62,6 +62,37 @@ type Post struct {
 // 	return ctx.GetStub().PutState(email, userJSON)
 // }
 
+// GetAllUsers retrieves all users from the blockchain
+func (s *SmartContract) GetAllUsers(ctx contractapi.TransactionContextInterface) ([]*User, error) {
+	// Get all user keys
+	resultsIterator, err := ctx.GetStub().GetStateByRange("", "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all users: %v", err)
+	}
+	defer resultsIterator.Close()
+
+	var users []*User
+	for resultsIterator.HasNext() {
+		queryResponse, err := resultsIterator.Next()
+		if err != nil {
+			return nil, fmt.Errorf("failed to iterate users: %v", err)
+		}
+
+		var user User
+		err = json.Unmarshal(queryResponse.Value, &user)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal user: %v", err)
+		}
+
+		// Clear sensitive data
+		user.Password = ""
+
+		users = append(users, &user)
+	}
+
+	return users, nil
+}
+
 func (s *SmartContract) CreateUser(ctx contractapi.TransactionContextInterface, email, hashedPassword, name, ipfsHash string) error {
 	exists, err := s.UserExists(ctx, email)
 	if err != nil {
