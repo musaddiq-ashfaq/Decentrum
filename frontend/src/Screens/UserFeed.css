@@ -53,7 +53,6 @@ h1 {
 }
 
 /* New styles for the popup */
-/* Popup container styling remains the same */
 .share-popup {
     position: fixed;
     top: 50%;
@@ -98,17 +97,13 @@ h1 {
     justify-content: space-between;
     align-items: center;
     padding: 8px 10px;
-    background-color: #f9f9f9;
+    background-color: #f3efef;
     border-radius: 5px;
     transition: background-color 0.2s;
 }
 
-.user-item:hover {
-    background-color: #f1f1f1;
-}
-
 .user-item span {
-    color: #555;
+    color: #000000;
 }
 
 .user-item button {
@@ -127,8 +122,8 @@ h1 {
 }
 
 /* Center the close button */
-.share-popup .close-button {
-    display: block;
+.close-button {
+    display: block; /* Make it a block element for centering */
     margin: 15px auto 0; /* Centering the close button */
     background-color: #ff4d4d;
     color: white;
@@ -137,8 +132,10 @@ h1 {
     border-radius: 4px;
     cursor: pointer;
     transition: background-color 0.3s;
+    width: 80%; /* Optional: set a width for the button */
+    text-align: center; /* Center text inside the button */
 }
 
-.share-popup .close-button:hover {
+.close-button:hover {
     background-color: #e60000;
 }
