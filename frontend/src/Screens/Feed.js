@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import "./UserFeed.css";
+// import Navbar from "./Navbar"; // Import Navbar
+import "./UserFeed.css"; // Import the CSS file for styling
 
 const UserFeed = () => {
   const [posts, setPosts] = useState([]);
@@ -60,17 +61,30 @@ const UserFeed = () => {
 
   return (
     <div className="user-feed-container">
+      {/* Add the Navbar at the top */}
+      {/* <Navbar /> */}
+
       <h1>User Feed</h1>
       <div className="posts-container">
         {posts.map((post) => (
           <div key={post.id} className="post-card">
             <h3>{post.user.name}</h3>
             <p>{post.content}</p>
+
+            {/* Check if the post contains an image */}
+            {post.imageHash && (
+              <div className="post-image">
+                {/* Assuming the image URL is constructed from the IPFS hash */}
+                <img
+                  src={`http://localhost:8080/ipfs/${post.imageHash}`}
+                  alt="Post content"
+                  style={{ width: "100%", maxHeight: "400px", objectFit: "contain" }}
+                />
+              </div>
+            )}
+
             <div className="reactions">
-              <span>{`${post.reactionCount} ${
-                post.reactionCount === 1 ? "reaction" : "reactions"
-              }`}</span>
-              <button className="reaction-button">👍 Like</button>
+              
               <button
                 className="share-button"
                 onClick={() => handleShareClick(post)}

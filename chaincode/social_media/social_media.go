@@ -4,217 +4,120 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
-type SmartContract struct {
-	contractapi.Contract
-}
-
-// User represents a user profile
-// type User struct {
-// 	Name           string `json:"name"`
-// 	Email          string `json:"email"`
-// 	Phone          string `json:"phone"`
-// 	Password       string `json:"password"`
-// 	ProfilePicture string `json:"profilePicture,omitempty"`
-// 	DataCID        string `json:"dataCID"`
-// }
-
+// User struct defines the user structure
+// User represents the user structure in the application (including public/private keys)
 type User struct {
 	Name           string `json:"name"`
-	Email          string `json:"email"`
 	Phone          string `json:"phone"`
-	Password       string `json:"password"`
-	ProfilePicture string `json:"profilePicture"`
-	DataCID        string `json:"dataCID"`
+	PublicKey  	   string `json:"publicKey"`
+	
 }
 
-// Post represents a social media post
 type Post struct {
-	UserEmail     string            `json:"userEmail"`
+	UserPublicKey     string            `json:"userPublicKey"`
 	ContentCID    string            `json:"contentCID"`
 	Timestamp     int64             `json:"timestamp"`
 	Reactions     map[string]string `json:"reactions"`
 	ReactionCount int               `json:"reactionCount"`
+	ShareCount    int                `json:"shareCount"`
 }
 
-// CreateUser creates a new user profile
-// func (s *SmartContract) CreateUser(ctx contractapi.TransactionContextInterface, email string, dataCID string) error {
-// 	exists, err := s.UserExists(ctx, email)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	if exists {
-// 		return fmt.Errorf("user already exists: %s", email)
-// 	}
-
-// 	user := User{
-// 		Email:   email,
-// 		DataCID: dataCID,
-// 	}
-// 	userJSON, err := json.Marshal(user)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	return ctx.GetStub().PutState(email, userJSON)
-// }
-
-// GetAllUsers retrieves all users from the blockchain
-func (s *SmartContract) GetAllUsers(ctx contractapi.TransactionContextInterface) ([]*User, error) {
-	// Get all user keys
-	resultsIterator, err := ctx.GetStub().GetStateByRange("", "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get all users: %v", err)
-	}
-	defer resultsIterator.Close()
-
-	var users []*User
-	for resultsIterator.HasNext() {
-		queryResponse, err := resultsIterator.Next()
-		if err != nil {
-			return nil, fmt.Errorf("failed to iterate users: %v", err)
-		}
-
-		var user User
-		err = json.Unmarshal(queryResponse.Value, &user)
-		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal user: %v", err)
-		}
-
-		// Clear sensitive data
-		user.Password = ""
-
-		users = append(users, &user)
-	}
-
-	return users, nil
+// SmartContract defines the chaincode structure
+type SmartContract struct {
+	contractapi.Contract
 }
 
-func (s *SmartContract) CreateUser(ctx contractapi.TransactionContextInterface, email, hashedPassword, name, ipfsHash string) error {
-	exists, err := s.UserExists(ctx, email)
+// RegisterUser registers a user with their public key and stores user data
+func (s *SmartContract) RegisterUser(ctx contractapi.TransactionContextInterface, name string, phone string, publicKey string) error {
+	// Check if user already exists
+	userExists, err := s.UserExists(ctx, publicKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("error checking if user exists: %v", err)
 	}
-	if exists {
-		return fmt.Errorf("user already exists: %s", email)
+	if userExists {
+		return fmt.Errorf("user with public key %s already exists", publicKey)
 	}
 
+	
+
+	// Create a new user object
 	user := User{
-		Email:          email,
-		Password:       hashedPassword,
 		Name:           name,
-		DataCID:        ipfsHash,
-		ProfilePicture: "", // Add a default empty string for ProfilePicture
+		Phone:          phone,
+		PublicKey:  publicKey,
+	
 	}
+
+	// Convert user struct to JSON
 	userJSON, err := json.Marshal(user)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal user data: %v", err)
 	}
 
-	fmt.Printf("Creating user with email: %s, hashedPassword: %s\n", email, hashedPassword)
-	err = ctx.GetStub().PutState(email, userJSON)
+	// Store the user data on the ledger
+	err = ctx.GetStub().PutState(publicKey, userJSON)
 	if err != nil {
-		fmt.Printf("Failed to put user state: %v\n", err)
-		return err
+		return fmt.Errorf("failed to store user data on ledger: %v", err)
 	}
-	fmt.Printf("User created successfully\n")
 
+	// Successfully stored the user
 	return nil
 }
 
-// UserExists checks if a user exists by email
-func (s *SmartContract) UserExists(ctx contractapi.TransactionContextInterface, email string) (bool, error) {
-	userJSON, err := ctx.GetStub().GetState(email)
+// GetUser retrieves a user's data based on their public key
+func (s *SmartContract) GetUser(ctx contractapi.TransactionContextInterface, publicKey string) (*User, error) {
+	// Check if user exists
+	userExists, err := s.UserExists(ctx, publicKey)
 	if err != nil {
-		return false, fmt.Errorf("failed to read from world state: %v", err)
+		return nil, fmt.Errorf("error checking if user exists: %v", err)
 	}
-	return userJSON != nil, nil
-}
+	if !userExists {
+		return nil, fmt.Errorf("user with public key %s does not exist", publicKey)
+	}
 
-// GetUser retrieves a user profile by email
-// func (s *SmartContract) GetUser(ctx contractapi.TransactionContextInterface, email string) (*User, error) {
-// 	userJSON, err := ctx.GetStub().GetState(email)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("failed to read from world state: %v", err)
-// 	}
-// 	if userJSON == nil {
-// 		return nil, fmt.Errorf("user does not exist: %s", email)
-// 	}
-
-// 	var user User
-// 	err = json.Unmarshal(userJSON, &user)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return &user, nil
-// }
-
-func (s *SmartContract) GetUser(ctx contractapi.TransactionContextInterface, email string) (*User, error) {
-	userJSON, err := ctx.GetStub().GetState(email)
+	// Retrieve the user data from the ledger
+	userJSON, err := ctx.GetStub().GetState(publicKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read from world state: %v", err)
+		return nil, fmt.Errorf("failed to get user data: %v", err)
 	}
 	if userJSON == nil {
-		return nil, fmt.Errorf("user does not exist: %s", email)
+		return nil, fmt.Errorf("user data not found for public key %s", publicKey)
 	}
 
+	// Unmarshal the JSON data into a User object
 	var user User
 	err = json.Unmarshal(userJSON, &user)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal user data: %v", err)
 	}
-
-	// Clear sensitive data before returning
-	user.Password = ""
 
 	return &user, nil
 }
 
-func (s *SmartContract) VerifyUserCredentials(ctx contractapi.TransactionContextInterface, email, hashedPassword string) (bool, error) {
-	fmt.Printf("Verifying credentials for email: %s, hashedPassword: %s\n", email, hashedPassword)
-
-	userJSON, err := ctx.GetStub().GetState(email)
+// UserExists checks whether a user already exists on the ledger by their public key
+func (s *SmartContract) UserExists(ctx contractapi.TransactionContextInterface, publicKey string) (bool, error) {
+	userJSON, err := ctx.GetStub().GetState(publicKey)
 	if err != nil {
-		fmt.Printf("Failed to read from world state: %v\n", err)
-		return false, fmt.Errorf("failed to read from world state: %v", err)
+		return false, fmt.Errorf("failed to read user data for public key %s: %v", publicKey, err)
 	}
-	if userJSON == nil {
-		fmt.Printf("User not found for email: %s\n", email)
-		return false, nil
-	}
-
-	var user User
-	err = json.Unmarshal(userJSON, &user)
-	if err != nil {
-		fmt.Printf("Failed to unmarshal user data: %v\n", err)
-		return false, err
-	}
-
-	fmt.Printf("Stored hashed password: %s\n", user.Password)
-	fmt.Printf("Provided hashed password: %s\n", hashedPassword)
-
-	isValid := user.Password == hashedPassword
-	fmt.Printf("Credentials valid: %v\n", isValid)
-
-	return isValid, nil
+	return userJSON != nil, nil
 }
 
-// CreatePost creates a new post for a user
-func (s *SmartContract) CreatePost(ctx contractapi.TransactionContextInterface, email string, ipfsHash string) error {
+func (s *SmartContract) CreatePost(ctx contractapi.TransactionContextInterface, publicKey string, ipfsHash string) error {
 	// Check if the user exists
-	userBytes, err := ctx.GetStub().GetState(email)
+	userBytes, err := ctx.GetStub().GetState(publicKey)
 	if err != nil {
 		return fmt.Errorf("failed to read user data: %v", err)
 	}
 	if userBytes == nil {
-		return fmt.Errorf("user does not exist: %s", email)
+		return fmt.Errorf("user does not exist: %s", publicKey)
 	}
 
 	// Create a composite key for posts
-	postsKey, err := ctx.GetStub().CreateCompositeKey("posts", []string{email})
+	postsKey, err := ctx.GetStub().CreateCompositeKey("posts", []string{publicKey})
 	if err != nil {
 		return fmt.Errorf("failed to create composite key: %v", err)
 	}
@@ -252,13 +155,13 @@ func (s *SmartContract) CreatePost(ctx contractapi.TransactionContextInterface, 
 	}
 
 	// Store the post under the all posts key
-	err = ctx.GetStub().PutState(allPostsKey, []byte(email))
+	err = ctx.GetStub().PutState(allPostsKey, []byte(publicKey))
 	if err != nil {
 		return fmt.Errorf("failed to store post in all posts: %v", err)
 	}
 
 	// Log the creation of the post
-	log.Printf("Created post for user %s with IPFS hash: %s", email, ipfsHash)
+	log.Printf("Created post for user %s with IPFS hash: %s", publicKey, ipfsHash)
 	log.Printf("Stored post with composite key: %s", allPostsKey)
 
 	return nil
@@ -324,14 +227,14 @@ func (s *SmartContract) GetAllPosts(ctx contractapi.TransactionContextInterface)
 }
 
 // AddReaction allows a user to react to a post
-func (s *SmartContract) AddReaction(ctx contractapi.TransactionContextInterface, postID string, userEmail string, reactionType string) error {
+func (s *SmartContract) AddReaction(ctx contractapi.TransactionContextInterface, postID string, publicKey string, reactionType string) error {
 	post, err := s.GetPost(ctx, postID)
 	if err != nil {
 		return err
 	}
 
 	// Add or update reaction
-	post.Reactions[userEmail] = reactionType
+	post.Reactions[publicKey] = reactionType
 	post.ReactionCount = len(post.Reactions)
 
 	// Marshal the updated post
@@ -345,18 +248,18 @@ func (s *SmartContract) AddReaction(ctx contractapi.TransactionContextInterface,
 }
 
 // GetPostsByUser retrieves all posts created by a specific user
-func (s *SmartContract) GetPostsByUser(ctx contractapi.TransactionContextInterface, email string) ([]string, error) {
+func (s *SmartContract) GetPostsByUser(ctx contractapi.TransactionContextInterface, publicKey string) ([]string, error) {
 	// Check if the user exists
-	userBytes, err := ctx.GetStub().GetState(email)
+	userBytes, err := ctx.GetStub().GetState(publicKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read user data: %v", err)
 	}
 	if userBytes == nil {
-		return nil, fmt.Errorf("user does not exist: %s", email)
+		return nil, fmt.Errorf("user does not exist: %s", publicKey)
 	}
 
 	// Create the composite key for the user's posts
-	postsKey, err := ctx.GetStub().CreateCompositeKey("posts", []string{email})
+	postsKey, err := ctx.GetStub().CreateCompositeKey("posts", []string{publicKey})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create composite key: %v", err)
 	}
@@ -367,7 +270,7 @@ func (s *SmartContract) GetPostsByUser(ctx contractapi.TransactionContextInterfa
 		return nil, fmt.Errorf("failed to retrieve posts: %v", err)
 	}
 	if postsBytes == nil {
-		return nil, fmt.Errorf("no posts found for user: %s", email)
+		return nil, fmt.Errorf("no posts found for user: %s", publicKey)
 	}
 
 	// Unmarshal the posts into a list of IPFS hashes
@@ -380,15 +283,17 @@ func (s *SmartContract) GetPostsByUser(ctx contractapi.TransactionContextInterfa
 	return posts, nil
 }
 
-// main function starts up the chaincode
+
+// main function starts the chaincode
 func main() {
 	chaincode, err := contractapi.NewChaincode(&SmartContract{})
 	if err != nil {
-		fmt.Printf("Error creating social media chaincode: %s", err.Error())
+		fmt.Printf("Error creating chaincode: %v", err)
 		return
 	}
 
+	// Start the chaincode
 	if err := chaincode.Start(); err != nil {
-		fmt.Printf("Error starting social media chaincode: %s", err.Error())
+		fmt.Printf("Error starting chaincode: %v", err)
 	}
 }

@@ -1,90 +1,103 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import './LoginPage.css';
 
 const LoginPage = () => {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [publicKey, setPublicKey] = useState('');
+  const [signature, setSignature] = useState('');
+  const [error, setError] = useState('');
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError(""); // Clear any existing errors
-
     try {
-      const response = await fetch("http://localhost:8081/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+      console.log('Public key:', publicKey);  // Log public key input
+      console.log('Signature:', signature);  // Log signature input
+      
+      // Send login request to the backend
+      const response = await fetch('http://localhost:8081/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ publicKey, signature }),
       });
 
-      const data = await response.json();
-
+      // Check if the response is successful
       if (response.ok) {
-        if (data.user) {
-          // Store user data in localStorage
-          localStorage.setItem("user", JSON.stringify(data.user));
-          navigate("/feed");
+        const data = await response.json();  // Parse the response data
+        
+        console.log('Response data:', data);  // Log the response from the backend
+
+        // Ensure the user data exists in the response
+        if (data) {
+          // Save the user data to localStorage
+          localStorage.setItem('user', JSON.stringify(data));
+          
+          // Verify the data stored in localStorage
+          console.log('User data stored in localStorage:', JSON.parse(localStorage.getItem('user')));
+          
+          // Redirect to the feed page on successful login
+          navigate('/feed');
         } else {
-          setError("Login successful but user data is missing");
+          // If no user data in the response, log an error
+          console.error('User data not found in response:', data);
+          setError('Login failed. No user data returned.');
         }
+      } else if (response.status === 401) {
+        setError('Wrong credentials. Please try again.');
       } else {
-        setError(data.message || "Wrong credentials. Please try again.");
+        // Handle other error responses
+        const errorData = await response.json();
+        alert(errorData.message || 'Login failed');
       }
     } catch (error) {
-      console.error("Error during login:", error);
-      setError("Failed to log in. Please check your connection and try again.");
+      console.error('Error during login:', error);
+      setError('Failed to log in.');
     }
   };
 
   return (
     <div className="container">
       <div className="form-container">
-        <h1 className="header">Facebook</h1>
+        <h1 className="header">Decentrum</h1>
         <form onSubmit={handleSubmit}>
           <div>
-            <label htmlFor="email" className="label">
-              Email or Phone
-            </label>
+            <label htmlFor="publicKey" className="label">Public Key</label>
             <input
-              id="email"
+              id="publicKey"
               type="text"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Enter your email or phone"
+              value={publicKey}
+              onChange={(e) => setPublicKey(e.target.value)}
+              placeholder="Enter your Public Key"
               required
               className="input"
             />
           </div>
           <div>
-            <label htmlFor="password" className="label">
-              Password
-            </label>
+            <label htmlFor="signature" className="label">Signature</label>
             <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
+              id="signature"
+              type="text"
+              value={signature}
+              onChange={(e) => setSignature(e.target.value)}
+              placeholder="Enter your Signature"
               required
               className="input"
             />
           </div>
+
           {error && <p className="error">{error}</p>}
-          <button type="submit" className="submit-button">
+          <button
+            type="submit"
+            className="submit-button"
+          >
             Log In
           </button>
         </form>
         <div className="forgot-password">
-          <a href="/forgot-password" className="link">
-            Forgot Password?
-          </a>
+          <a href="/forgot-password" className="link">Forgot Password?</a>
         </div>
         <p className="signup-text">
-          Don't have an account?{" "}
-          <a href="/signup" className="link">
-            Sign up
-          </a>
+          Don't have an account? <a href="/signup" className="link">Sign up</a>
         </p>
       </div>
     </div>

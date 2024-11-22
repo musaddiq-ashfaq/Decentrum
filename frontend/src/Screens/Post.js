@@ -1,11 +1,19 @@
 import React, { useEffect, useState } from "react";
-import "./Userpost.css"; // Import the CSS file for styling
+import { useNavigate } from "react-router-dom";
+import Modal from "./Modal";
+// import Navbar from "./Navbar";
+import "./Userpost.css";
 
 const UserPost = () => {
   const [posts, setPosts] = useState([]);
   const [newPost, setNewPost] = useState("");
+  const [newImage, setNewImage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState(null);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [showModal, setShowModal] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     try {
@@ -13,6 +21,7 @@ const UserPost = () => {
       if (userDataString) {
         const userData = JSON.parse(userDataString);
         setCurrentUser(userData);
+        console.log("Retrieved user data:", userData);
       } else {
         console.log("No user data found in localStorage");
         setCurrentUser(null);
@@ -20,12 +29,10 @@ const UserPost = () => {
     } catch (error) {
       console.error("Error parsing user data from localStorage:", error);
       setCurrentUser(null);
-      // Optionally clear the invalid data
       localStorage.removeItem("user");
     }
   }, []);
 
-  // Rest of your useEffect for fetching posts remains the same
   useEffect(() => {
     const fetchPosts = async () => {
       try {
@@ -44,50 +51,69 @@ const UserPost = () => {
 
   const handlePostSubmit = async (e) => {
     e.preventDefault();
-    if (!newPost.trim() || !currentUser) return; // Check if user exists
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    if (!newPost.trim() && !newImage) {
+      setErrorMessage("Please input text or an image to post.");
+      return;
+    }
+
+    if (!currentUser || !currentUser.publicKey) {
+      setErrorMessage("User not authenticated. Please login again.");
+      return;
+    }
 
     try {
+      // Create the request body according to the backend's expected format
+      const postData = {
+        content: newPost.trim(),
+        publicKey: currentUser.publicKey
+      };
+
       const response = await fetch("http://localhost:8081/post", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          user: {
-            name: currentUser.name,
-            email: currentUser.email,
-          },
-          content: newPost,
-          reactions: {
-            likes: "0",
-          },
-          reactionCount: 0,
-        }),
+        body: JSON.stringify(postData),
       });
-
-      if (response.ok) {
-        const createdPost = await response.json();
-        setPosts([createdPost, ...posts]);
-        setNewPost("");
-      } else {
-        console.error("Failed to create post", response.status);
+      
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(`Server responded with ${response.status}: ${errorData}`);
       }
+
+      const createdPost = await response.json();
+      setPosts([createdPost, ...posts]);
+      setNewPost("");
+      setNewImage(null);
+      setSuccessMessage("Post created successfully!");
+      setShowModal(true);
     } catch (error) {
       console.error("Error creating post:", error);
+      setErrorMessage(`Failed to create post: ${error.message}`);
     }
   };
 
+  const handleModalClose = () => {
+    setShowModal(false);
+    // navigate("/feed");
+  };
+
   const handleReaction = async (postId, reaction) => {
+    if (!currentUser) {
+      setErrorMessage("Please login to react to posts");
+      return;
+    }
+
     const post = posts.find((p) => p.id === postId);
-    const isAlreadyReacted =
-      post.reactions && post.reactions.includes(reaction);
+    const isAlreadyReacted = post.reactions && post.reactions.includes(reaction);
     let updatedReactions;
 
     if (isAlreadyReacted) {
-      // Remove the reaction
       updatedReactions = post.reactions.filter((r) => r !== reaction);
     } else {
-      // Add the reaction
       updatedReactions = [...(post.reactions || []), reaction];
     }
 
@@ -100,60 +126,40 @@ const UserPost = () => {
         body: JSON.stringify({
           postId,
           reaction: isAlreadyReacted ? null : reaction,
+          publicKey: currentUser.publicKey
         }),
       });
 
       if (response.ok) {
         const updatedPost = await response.json();
-
-        // Update the local posts state with the new reactions and counts
         setPosts(
           posts.map((post) => {
             if (post.id === updatedPost.id) {
               return {
                 ...post,
                 reactions: updatedReactions,
-                reactionCount: updatedReactions.length, // Update the count based on the new reactions
+                reactionCount: updatedReactions.length,
               };
             }
             return post;
           })
         );
       } else {
-        console.error("Failed to react to post", response.status);
+        throw new Error(`Failed to react to post: ${response.statusText}`);
       }
     } catch (error) {
       console.error("Error reacting to post:", error);
-    }
-  };
-
-  const handleShare = async (postId) => {
-    try {
-      const response = await fetch(`http://localhost:8081/share`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ postId }),
-      });
-
-      if (response.ok) {
-        const sharedPost = await response.json();
-        setPosts([sharedPost, ...posts]); // Add shared post to the top of the feed
-      } else {
-        console.error("Failed to share post", response.status);
-      }
-    } catch (error) {
-      console.error("Error sharing post:", error);
+      setErrorMessage(error.message);
     }
   };
 
   if (loading) {
-    return <div>Loading posts...</div>;
+    return <div className="loading-spinner">Loading posts...</div>;
   }
 
   return (
-    <div className="user-feed-container">
+    <div className="user-post-container">
+      {/* <Navbar /> */}
       {currentUser ? (
         <>
           <h1>Create Post</h1>
@@ -162,15 +168,47 @@ const UserPost = () => {
               value={newPost}
               onChange={(e) => setNewPost(e.target.value)}
               placeholder="What's on your mind?"
-              required
+              className="post-textarea"
             />
             <button type="submit" className="submit-button">
               Post
             </button>
           </form>
+          {errorMessage && <p className="error-message">{errorMessage}</p>}
         </>
       ) : (
-        <p> Please login to create post</p>
+        <p className="login-prompt">Please login to create a post</p>
+      )}
+      <div className="posts-container">
+        {posts.map((post) => (
+          <div key={post.id} className="post-card">
+            <p className="post-content">{post.content}</p>
+            <div className="post-footer">
+              <div className="reactions">
+                <button
+                  className="reaction-button"
+                  onClick={() => handleReaction(post.id, "like")}
+                >
+                  👍 Like
+                </button>
+                <button
+                  className="reaction-button"
+                  onClick={() => handleReaction(post.id, "love")}
+                >
+                  ❤️ Love
+                </button>
+                <span className="reaction-count">
+                  {`${post.reactionCount || 0} ${
+                    post.reactionCount === 1 ? "reaction" : "reactions"
+                  }`}
+                </span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {showModal && (
+        <Modal message={successMessage} onClose={handleModalClose} />
       )}
     </div>
   );
