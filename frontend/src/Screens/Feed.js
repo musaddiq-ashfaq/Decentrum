@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-// import Navbar from "./Navbar"; // Import Navbar
+import Navbar from "./Navbar"; // Import Navbar
 import "./UserFeed.css"; // Import the CSS file for styling
 
 const UserFeed = () => {
@@ -61,8 +61,7 @@ const UserFeed = () => {
 
   return (
     <div className="user-feed-container">
-      {/* Add the Navbar at the top */}
-      {/* <Navbar /> */}
+      <Navbar />
 
       <h1>User Feed</h1>
       <div className="posts-container">

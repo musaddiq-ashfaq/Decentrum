@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Modal from "./Modal";
-// import Navbar from "./Navbar";
+import Navbar from "./Navbar";
 import "./Userpost.css";
 
 const UserPost = () => {
@@ -159,7 +159,7 @@ const UserPost = () => {
 
   return (
     <div className="user-post-container">
-      {/* <Navbar /> */}
+      <Navbar />
       {currentUser ? (
         <>
           <h1>Create Post</h1>
