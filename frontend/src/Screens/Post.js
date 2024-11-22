@@ -1,217 +1,185 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import Modal from "./Modal";
-import Navbar from "./Navbar";
-import "./Userpost.css";
+import React, { useState, useEffect } from 'react';
+import { AlertCircle, CheckCircle2, Loader2, Send } from 'lucide-react';
 
-const UserPost = () => {
-  const [posts, setPosts] = useState([]);
-  const [newPost, setNewPost] = useState("");
-  const [newImage, setNewImage] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState(null);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
-  const [showModal, setShowModal] = useState(false);
-  const navigate = useNavigate();
+// Alert Components
+const Alert = ({ children, className, ...props }) => (
+  <div
+    role="alert"
+    className={`relative w-full rounded-lg border p-4 ${className}`}
+    {...props}
+  >
+    {children}
+  </div>
+);
 
-  useEffect(() => {
-    try {
-      const userDataString = localStorage.getItem("user");
-      if (userDataString) {
-        const userData = JSON.parse(userDataString);
-        setCurrentUser(userData);
-        console.log("Retrieved user data:", userData);
-      } else {
-        console.log("No user data found in localStorage");
-        setCurrentUser(null);
-      }
-    } catch (error) {
-      console.error("Error parsing user data from localStorage:", error);
-      setCurrentUser(null);
-      localStorage.removeItem("user");
-    }
-  }, []);
+const AlertTitle = ({ children, className, ...props }) => (
+  <h5 className={`mb-1 font-medium leading-none tracking-tight ${className}`} {...props}>
+    {children}
+  </h5>
+);
+
+const AlertDescription = ({ children, className, ...props }) => (
+  <div className={`text-sm ${className}`} {...props}>
+    {children}
+  </div>
+);
+
+const CreatePost = () => {
+  const [content, setContent] = useState('');
+  const [status, setStatus] = useState('idle');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [wallet, setWallet] = useState(null);
 
   useEffect(() => {
-    const fetchPosts = async () => {
+    // Check for wallet data on component mount
+    const storedWallet = localStorage.getItem('userWallet');
+    if (storedWallet) {
       try {
-        const response = await fetch("http://localhost:8081/post");
-        const data = await response.json();
-        setPosts(data);
+        const parsedWallet = JSON.parse(storedWallet);
+        if (parsedWallet && parsedWallet.publicKey) {
+          setWallet(parsedWallet);
+        }
       } catch (error) {
-        console.error("Error fetching posts:", error);
-      } finally {
-        setLoading(false);
+        console.error('Error parsing wallet data:', error);
+        setStatus('error');
+        setErrorMessage('Invalid wallet data. Please login again.');
       }
-    };
-
-    fetchPosts();
+    }
   }, []);
 
-  const handlePostSubmit = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setErrorMessage("");
-    setSuccessMessage("");
 
-    if (!newPost.trim() && !newImage) {
-      setErrorMessage("Please input text or an image to post.");
+    // Basic validation
+    if (!content.trim()) {
+      setStatus('error');
+      setErrorMessage('Post content cannot be empty');
       return;
     }
 
-    if (!currentUser || !currentUser.publicKey) {
-      setErrorMessage("User not authenticated. Please login again.");
+    if (!wallet || !wallet.publicKey) {
+      setStatus('error');
+      setErrorMessage('Please login to create a post');
       return;
     }
+
+    setStatus('loading');
 
     try {
-      // Create the request body according to the backend's expected format
       const postData = {
-        content: newPost.trim(),
-        publicKey: currentUser.publicKey
+        content: content.trim(),
+        wallet: {
+          publicKey: wallet.publicKey,
+          privateKey: wallet.privateKey // Include if needed by your backend
+        },
+        timestamp: new Date().toISOString(),
       };
 
-      const response = await fetch("http://localhost:8081/post", {
-        method: "POST",
+      console.log('Sending post data:', postData); // Debug log
+
+      const response = await fetch('http://localhost:8081/post', {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(postData),
       });
-      
+
       if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(`Server responded with ${response.status}: ${errorData}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `Error: ${response.status}`);
       }
 
-      const createdPost = await response.json();
-      setPosts([createdPost, ...posts]);
-      setNewPost("");
-      setNewImage(null);
-      setSuccessMessage("Post created successfully!");
-      setShowModal(true);
+      const result = await response.json();
+      console.log('Post created:', result);
+
+      setContent('');
+      setStatus('success');
+
+      setTimeout(() => {
+        setStatus('idle');
+      }, 3000);
     } catch (error) {
-      console.error("Error creating post:", error);
-      setErrorMessage(`Failed to create post: ${error.message}`);
+      console.error('Post creation failed:', error);
+      setStatus('error');
+      setErrorMessage(error.message || 'Failed to create post. Please try again.');
     }
   };
 
-  const handleModalClose = () => {
-    setShowModal(false);
-    // navigate("/feed");
-  };
-
-  const handleReaction = async (postId, reaction) => {
-    if (!currentUser) {
-      setErrorMessage("Please login to react to posts");
-      return;
-    }
-
-    const post = posts.find((p) => p.id === postId);
-    const isAlreadyReacted = post.reactions && post.reactions.includes(reaction);
-    let updatedReactions;
-
-    if (isAlreadyReacted) {
-      updatedReactions = post.reactions.filter((r) => r !== reaction);
-    } else {
-      updatedReactions = [...(post.reactions || []), reaction];
-    }
-
-    try {
-      const response = await fetch(`http://localhost:8081/reactions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          postId,
-          reaction: isAlreadyReacted ? null : reaction,
-          publicKey: currentUser.publicKey
-        }),
-      });
-
-      if (response.ok) {
-        const updatedPost = await response.json();
-        setPosts(
-          posts.map((post) => {
-            if (post.id === updatedPost.id) {
-              return {
-                ...post,
-                reactions: updatedReactions,
-                reactionCount: updatedReactions.length,
-              };
-            }
-            return post;
-          })
-        );
-      } else {
-        throw new Error(`Failed to react to post: ${response.statusText}`);
-      }
-    } catch (error) {
-      console.error("Error reacting to post:", error);
-      setErrorMessage(error.message);
+  const handleKeyDown = (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      handleSubmit(e);
     }
   };
 
-  if (loading) {
-    return <div className="loading-spinner">Loading posts...</div>;
+  // Show login required message if no wallet is found
+  if (!wallet) {
+    return (
+      <div className="max-w-2xl mx-auto p-4">
+        <Alert className="bg-yellow-50 border-yellow-200">
+          <AlertCircle className="h-4 w-4 text-yellow-500" />
+          <AlertTitle>Login Required</AlertTitle>
+          <AlertDescription>Please login to create posts</AlertDescription>
+        </Alert>
+      </div>
+    );
   }
 
   return (
-    <div className="user-post-container">
-      <Navbar />
-      {currentUser ? (
-        <>
-          <h1>Create Post</h1>
-          <form onSubmit={handlePostSubmit} className="new-post-form">
-            <textarea
-              value={newPost}
-              onChange={(e) => setNewPost(e.target.value)}
-              placeholder="What's on your mind?"
-              className="post-textarea"
-            />
-            <button type="submit" className="submit-button">
-              Post
-            </button>
-          </form>
-          {errorMessage && <p className="error-message">{errorMessage}</p>}
-        </>
-      ) : (
-        <p className="login-prompt">Please login to create a post</p>
-      )}
-      <div className="posts-container">
-        {posts.map((post) => (
-          <div key={post.id} className="post-card">
-            <p className="post-content">{post.content}</p>
-            <div className="post-footer">
-              <div className="reactions">
-                <button
-                  className="reaction-button"
-                  onClick={() => handleReaction(post.id, "like")}
-                >
-                  👍 Like
-                </button>
-                <button
-                  className="reaction-button"
-                  onClick={() => handleReaction(post.id, "love")}
-                >
-                  ❤️ Love
-                </button>
-                <span className="reaction-count">
-                  {`${post.reactionCount || 0} ${
-                    post.reactionCount === 1 ? "reaction" : "reactions"
-                  }`}
-                </span>
-              </div>
-            </div>
+    <div className="max-w-2xl mx-auto p-4 space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="relative">
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="What's on your mind? (Press Ctrl + Enter to post)"
+            className="w-full p-4 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none min-h-[120px]"
+            disabled={status === 'loading'}
+          />
+          <div className="absolute bottom-3 right-3 text-gray-400 text-sm">
+            {content.length} / 1000
           </div>
-        ))}
-      </div>
-      {showModal && (
-        <Modal message={successMessage} onClose={handleModalClose} />
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={!content.trim() || status === 'loading'}
+            className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
+          >
+            {status === 'loading' ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Posting...
+              </>
+            ) : (
+              <>
+                <Send className="h-4 w-4" />
+                Post
+              </>
+            )}
+          </button>
+        </div>
+      </form>
+
+      {status === 'success' && (
+        <Alert className="bg-green-50 border-green-200">
+          <CheckCircle2 className="h-4 w-4 text-green-500" />
+          <AlertTitle>Success!</AlertTitle>
+          <AlertDescription>Your post was created successfully</AlertDescription>
+        </Alert>
+      )}
+
+      {status === 'error' && (
+        <Alert className="bg-red-50 border-red-200">
+          <AlertCircle className="h-4 w-4 text-red-500" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
       )}
     </div>
   );
 };
 
-export default UserPost;
+export default CreatePost;

@@ -4,18 +4,18 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"strings"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
-	"math/big"
 
 	"github.com/gorilla/mux"
 	"github.com/hyperledger/fabric-gateway/pkg/client"
@@ -26,7 +26,6 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 )
-
 
 // User represents the user structure in the application
 type User struct {
@@ -40,6 +39,7 @@ type Wallet struct {
 	PublicKey  string `json:"publicKey"`
 	PrivateKey string `json:"privateKey"`
 }
+
 // Post represents a social media post
 type Post struct {
 	ID            int               `json:"id"`
@@ -52,13 +52,10 @@ type Post struct {
 	ShareCount    int               `json:"shareCount"`
 }
 
-
 var (
-	ipfsShell    *shell.Shell
-	contract     *client.Contract
+	ipfsShell *shell.Shell
+	contract  *client.Contract
 )
-
-
 
 // initFabric initializes the connection to the Fabric network
 func initFabric() error {
@@ -71,10 +68,10 @@ func initFabric() error {
 		id,
 		client.WithSign(sign),
 		client.WithClientConnection(clientConnection),
-		client.WithEvaluateTimeout(20*time.Minute),     // Increased timeout for evaluation
-		client.WithEndorseTimeout(20*time.Minute),      // Increased timeout for endorsement
-		client.WithSubmitTimeout(20*time.Minute),       // Increased timeout for submission
-		client.WithCommitStatusTimeout(8*time.Minute),  // Increased timeout for commit status
+		client.WithEvaluateTimeout(20*time.Minute),    // Increased timeout for evaluation
+		client.WithEndorseTimeout(20*time.Minute),     // Increased timeout for endorsement
+		client.WithSubmitTimeout(20*time.Minute),      // Increased timeout for submission
+		client.WithCommitStatusTimeout(8*time.Minute), // Increased timeout for commit status
 	)
 	if err != nil {
 		return fmt.Errorf("failed to connect to gateway: %w", err)
@@ -99,7 +96,8 @@ func newGrpcConnection() *grpc.ClientConn {
 
 	// Configure keepalive options
 	kaOpts := keepalive.ClientParameters{
-		Time:                10 * time.Second, // Send pings every 10 seconds
+		// Time:                10 * time.Second, // Send pings every 10 seconds
+		Time:                20 * time.Second,
 		Timeout:             30 * time.Second, // Wait 30 seconds for ping ack
 		PermitWithoutStream: true,             // Send pings even without active streams
 	}
@@ -222,9 +220,14 @@ func generateKeys() (*ecdsa.PrivateKey, *ecdsa.PublicKey, error) {
 
 // uploadToIPFS uploads a file to IPFS and returns the IPFS link
 func uploadToIPFS(filePath string) (string, error) {
+	// Initialize IPFS connection if not already initialized
 	if ipfsShell == nil {
-		// Initialize IPFS connection if not already initialized
 		ipfsShell = shell.NewShell("localhost:5001")
+	}
+
+	// Verify IPFS shell connection
+	if ipfsShell == nil {
+		return "", fmt.Errorf("failed to connect to IPFS shell")
 	}
 
 	file, err := os.Open(filePath)
@@ -242,158 +245,155 @@ func uploadToIPFS(filePath string) (string, error) {
 }
 
 func SignUpHandler(w http.ResponseWriter, r *http.Request) {
-    var user User
-    // Decode the incoming request body into the user struct
-    if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-        http.Error(w, err.Error(), http.StatusBadRequest)
-        return
-    }
+	var user User
+	// Decode the incoming request body into the user struct
+	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
-    // Debug: Print incoming user data for validation
-    fmt.Printf("Received user data: %+v\n", user)
+	// Debug: Print incoming user data for validation
+	fmt.Printf("Received user data: %+v\n", user)
 
-    // Generate wallet for the user (Public/Private Key pair)
-    wallet, err := generateWallet()
-    if err != nil {
-        http.Error(w, fmt.Sprintf("Error generating wallet: %v", err), http.StatusInternalServerError)
-        return
-    }
+	// Generate wallet for the user (Public/Private Key pair)
+	wallet, err := generateWallet()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error generating wallet: %v", err), http.StatusInternalServerError)
+		return
+	}
 
-    // Debug: Print generated wallet information
-    fmt.Printf("Generated wallet: PublicKey = %s, PrivateKey = %s\n", wallet.PublicKey, wallet.PrivateKey)
+	// Debug: Print generated wallet information
+	fmt.Printf("Generated wallet: PublicKey = %s, PrivateKey = %s\n", wallet.PublicKey, wallet.PrivateKey)
 
-    // Prepare the user data for the blockchain
-    userData := map[string]interface{}{
-        "name":           user.Name,
-        "phone":          user.Phone,
-        "publicKey":      wallet.PublicKey,
-        "privateKey":     wallet.PrivateKey,
-    }
+	// Prepare the user data for the blockchain
+	userData := map[string]interface{}{
+		"name":       user.Name,
+		"phone":      user.Phone,
+		"publicKey":  wallet.PublicKey,
+		"privateKey": wallet.PrivateKey,
+	}
 
-    // Debug: Print the user data to be stored on the blockchain
-    fmt.Printf("Storing user data on blockchain: %+v\n", userData)
+	// Debug: Print the user data to be stored on the blockchain
+	fmt.Printf("Storing user data on blockchain: %+v\n", userData)
 
-    // Store the user data in the blockchain using the chaincode "RegisterUser"
-    _, err = contract.SubmitTransaction("RegisterUser", user.Name, user.Phone, wallet.PublicKey)
-    if err != nil {
-        http.Error(w, fmt.Sprintf("Error registering user on blockchain: %v", err), http.StatusInternalServerError)
-        return
-    }
+	// Store the user data in the blockchain using the chaincode "RegisterUser"
+	_, err = contract.SubmitTransaction("RegisterUser", user.Name, user.Phone, wallet.PublicKey)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error registering user on blockchain: %v", err), http.StatusInternalServerError)
+		return
+	}
 
-    // Verify that the data was stored on the blockchain by querying the data
-    // Assuming "GetUser" is a chaincode function to retrieve the user based on their publicKey
-    fmt.Println("Sending Public Key:", wallet.PublicKey)
-    response, err := contract.EvaluateTransaction("GetUser", wallet.PublicKey)
-    if err != nil {
-        http.Error(w, fmt.Sprintf("Error fetching user data from blockchain: %v", err), http.StatusInternalServerError)
-        return
-    }
+	// Verify that the data was stored on the blockchain by querying the data
+	// Assuming "GetUser" is a chaincode function to retrieve the user based on their publicKey
+	fmt.Println("Sending Public Key:", wallet.PublicKey)
+	response, err := contract.EvaluateTransaction("GetUser", wallet.PublicKey)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error fetching user data from blockchain: %v", err), http.StatusInternalServerError)
+		return
+	}
 
-    // Debug: Print the retrieved blockchain data for validation
-    fmt.Println("Retrieved Blockchain Data:", string(response))
+	// Debug: Print the retrieved blockchain data for validation
+	fmt.Println("Retrieved Blockchain Data:", string(response))
 
-    // Expected user data as a JSON string
-    expectedData := fmt.Sprintf("{\"name\":\"%s\",\"phone\":\"%s\",\"publicKey\":\"%s\"}",
-        user.Name, user.Phone, wallet.PublicKey)
+	// Expected user data as a JSON string
+	expectedData := fmt.Sprintf("{\"name\":\"%s\",\"phone\":\"%s\",\"publicKey\":\"%s\"}",
+		user.Name, user.Phone, wallet.PublicKey)
 
-    // Compare the expected and actual data
-    if string(response) == expectedData {
-        // Respond with the user data and wallet information
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusCreated)
-        json.NewEncoder(w).Encode(userData)
-    } else {
-        // If there's a mismatch, print the differences
-        fmt.Println("Mismatch found between expected and retrieved data:")
-        fmt.Println("Expected Data:", expectedData)
-        fmt.Println("Actual Data:", string(response))
+	// Compare the expected and actual data
+	if string(response) == expectedData {
+		// Respond with the user data and wallet information
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(userData)
+	} else {
+		// If there's a mismatch, print the differences
+		fmt.Println("Mismatch found between expected and retrieved data:")
+		fmt.Println("Expected Data:", expectedData)
+		fmt.Println("Actual Data:", string(response))
 
-        // Respond with an error message
-        http.Error(w, "User data verification failed on blockchain", http.StatusInternalServerError)
-    }
+		// Respond with an error message
+		http.Error(w, "User data verification failed on blockchain", http.StatusInternalServerError)
+	}
 }
-
-
 
 func LoginHandler(w http.ResponseWriter, r *http.Request) {
-    var request struct {
-        PublicKey  string `json:"publicKey"`
-        PrivateKey string `json:"privateKey"`
-    }
+	var request struct {
+		PublicKey  string `json:"publicKey"`
+		PrivateKey string `json:"privateKey"`
+	}
 
-    // Decode the incoming request body
-    if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-        http.Error(w, "Failed to decode request body: "+err.Error(), http.StatusBadRequest)
-        return
-    }
+	// Decode the incoming request body
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "Failed to decode request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 
-    // Debug: Print received keys
-    fmt.Printf("Received Public Key: %s\n", request.PublicKey)
-    fmt.Printf("Received Private Key: %s\n", request.PrivateKey)
+	// Debug: Print received keys
+	fmt.Printf("Received Public Key: %s\n", request.PublicKey)
+	fmt.Printf("Received Private Key: %s\n", request.PrivateKey)
 
-    // Split the public key into X and Y components
-    if len(request.PublicKey) < 128 {
-        http.Error(w, "Invalid public key length", http.StatusBadRequest)
-        return
-    }
-    pubXHex := request.PublicKey[:64] // First 64 characters for X
-    pubYHex := request.PublicKey[64:] // Last 64 characters for Y
+	// Split the public key into X and Y components
+	if len(request.PublicKey) < 128 {
+		http.Error(w, "Invalid public key length", http.StatusBadRequest)
+		return
+	}
+	pubXHex := request.PublicKey[:64] // First 64 characters for X
+	pubYHex := request.PublicKey[64:] // Last 64 characters for Y
 
-    // Convert public key components to big.Int
-    pubX := new(big.Int)
-    pubY := new(big.Int)
-    pubX.SetString(pubXHex, 16)
-    pubY.SetString(pubYHex, 16)
+	// Convert public key components to big.Int
+	pubX := new(big.Int)
+	pubY := new(big.Int)
+	pubX.SetString(pubXHex, 16)
+	pubY.SetString(pubYHex, 16)
 
-    // Reconstruct the public key
-    pubKey := &ecdsa.PublicKey{
-        Curve: elliptic.P256(),
-        X:     pubX,
-        Y:     pubY,
-    }
+	// Reconstruct the public key
+	pubKey := &ecdsa.PublicKey{
+		Curve: elliptic.P256(),
+		X:     pubX,
+		Y:     pubY,
+	}
 
-    // Decode the private key from hex
-    privKeyInt := new(big.Int)
-    privKeyInt.SetString(request.PrivateKey, 16)
+	// Decode the private key from hex
+	privKeyInt := new(big.Int)
+	privKeyInt.SetString(request.PrivateKey, 16)
 
-    // Reconstruct the private key
-    privKey := &ecdsa.PrivateKey{
-        PublicKey: *pubKey,
-        D:         privKeyInt,
-    }
+	// Reconstruct the private key
+	privKey := &ecdsa.PrivateKey{
+		PublicKey: *pubKey,
+		D:         privKeyInt,
+	}
 
-    // Verify if the public key corresponds to the private key
-    if privKey.PublicKey.X.Cmp(pubKey.X) != 0 || privKey.PublicKey.Y.Cmp(pubKey.Y) != 0 {
-        http.Error(w, "Public key does not match private key", http.StatusUnauthorized)
-        return
-    }
+	// Verify if the public key corresponds to the private key
+	if privKey.PublicKey.X.Cmp(pubKey.X) != 0 || privKey.PublicKey.Y.Cmp(pubKey.Y) != 0 {
+		http.Error(w, "Public key does not match private key", http.StatusUnauthorized)
+		return
+	}
 
-    // Blockchain Verification: Check if the public key exists in the blockchain
-    response, err := contract.EvaluateTransaction("GetUser", request.PublicKey)
-    if err != nil {
-        http.Error(w, "Error querying blockchain: "+err.Error(), http.StatusInternalServerError)
-        return
-    }
+	// Blockchain Verification: Check if the public key exists in the blockchain
+	response, err := contract.EvaluateTransaction("GetUser", request.PublicKey)
+	if err != nil {
+		http.Error(w, "Error querying blockchain: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-    if string(response) == "" {
-        http.Error(w, "Public key not found in blockchain", http.StatusUnauthorized)
-        return
-    }
+	if string(response) == "" {
+		http.Error(w, "Public key not found in blockchain", http.StatusUnauthorized)
+		return
+	}
 
-    // If all checks pass, send a success response
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(http.StatusOK)
+	// If all checks pass, send a success response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 
-    // Optionally respond with user data
-    var userData map[string]interface{}
-    if err := json.Unmarshal(response, &userData); err != nil {
-        http.Error(w, "Error unmarshalling blockchain data: "+err.Error(), http.StatusInternalServerError)
-        return
-    }
+	// Optionally respond with user data
+	var userData map[string]interface{}
+	if err := json.Unmarshal(response, &userData); err != nil {
+		http.Error(w, "Error unmarshalling blockchain data: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-    json.NewEncoder(w).Encode(userData)
+	json.NewEncoder(w).Encode(userData)
 }
-
 
 func PostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -412,7 +412,7 @@ func PostHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Check if the user exists on the blockchain (optional validation)
+		// Check if the user exists on the blockchain
 		isValid, err := verifyUserExists(post.Wallet.PublicKey)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to verify user: %v", err), http.StatusInternalServerError)
@@ -422,7 +422,7 @@ func PostHandler(w http.ResponseWriter, r *http.Request) {
 
 		if !isValid {
 			http.Error(w, "User does not exist.", http.StatusUnauthorized)
-			log.Printf("Unauthorized attempt to create post for non-existing user: %s", post.User.PublicKey)
+			log.Printf("Unauthorized attempt to create post for non-existing user: %s", post.Wallet.PublicKey)
 			return
 		}
 
@@ -431,7 +431,17 @@ func PostHandler(w http.ResponseWriter, r *http.Request) {
 		post.Timestamp = time.Now()
 
 		// Convert post to JSON
-		postJSON, _ := json.Marshal(post)
+		postJSON, err := json.Marshal(post)
+		if err != nil {
+			http.Error(w, "Failed to marshal post data", http.StatusInternalServerError)
+			log.Printf("Failed to marshal post: %v", err)
+			return
+		}
+
+		// Ensure IPFS is initialized
+		if ipfsShell == nil {
+			ipfsShell = shell.NewShell("localhost:5001")
+		}
 
 		// Store post content in IPFS
 		ipfsHash, err := ipfsShell.Add(strings.NewReader(string(postJSON)))
@@ -546,7 +556,6 @@ func FeedHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(posts)
 }
 
-
 func submitPostWithRetry(publicKey string, ipfsHash string) ([]byte, error) {
 	maxRetries := 4
 	var lastErr error
@@ -633,9 +642,7 @@ func getPostFromIPFS(ipfsHash string) (*Post, error) {
 	return &post, nil
 }
 
-
 func main() {
-	
 
 	// Initialize Fabric connection
 	if err := initFabric(); err != nil {
@@ -646,8 +653,8 @@ func main() {
 	r := mux.NewRouter()
 	r.HandleFunc("/signup", SignUpHandler).Methods("POST")
 	r.HandleFunc("/login", LoginHandler).Methods("POST")
-	r.HandleFunc("/post", SignUpHandler).Methods("POST")
-	r.HandleFunc("/feed", SignUpHandler).Methods("GET")
+	r.HandleFunc("/post", PostHandler).Methods("POST")
+	r.HandleFunc("/feed", FeedHandler).Methods("GET")
 
 	// Apply CORS middleware
 	c := cors.New(cors.Options{
