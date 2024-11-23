@@ -1,70 +1,163 @@
-.user-feed-container {
-    width: 80%;
-    margin: 0 auto;
-    padding: 20px;
-}
-
-.new-post-form {
-    margin-bottom: 20px;
-}
-
-.new-post-form textarea {
+.max-w-2xl {
+    max-width: 40rem;
+  }
+  
+  .mx-auto {
+    margin-left: auto;
+    margin-right: auto;
+  }
+  
+  .p-4 {
+    padding: 1rem;
+  }
+  
+  .space-y-4 > * + * {
+    margin-top: 1rem;
+  }
+  
+  .relative {
+    position: relative;
+  }
+  
+  .w-full {
     width: 100%;
-    height: 80px;
-    padding: 10px;
-    border: 1px solid #ccc;
-    border-radius: 5px;
-}
-
-.submit-button {
-    margin-top: 10px;
-    padding: 10px 15px;
-    background-color: #007bff;
-    color: white;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-}
-
-.submit-button:hover {
-    background-color: #0056b3;
-}
-
-.posts-container {
+  }
+  
+  .p-4 {
+    padding: 1rem;
+  }
+  
+  .border {
+    border: 1px solid #e5e7eb;
+  }
+  
+  .rounded-lg {
+    border-radius: 0.5rem;
+  }
+  
+  .focus\:ring-2:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px #3b82f6;
+  }
+  
+  .focus\:ring-blue-500:focus {
+    box-shadow: 0 0 0 2px #3b82f6;
+  }
+  
+  .focus\:border-transparent:focus {
+    border-color: transparent;
+  }
+  
+  .min-h-\[120px\] {
+    min-height: 120px;
+  }
+  
+  .absolute {
+    position: absolute;
+  }
+  
+  .bottom-3 {
+    bottom: 0.75rem;
+  }
+  
+  .right-3 {
+    right: 0.75rem;
+  }
+  
+  .text-gray-400 {
+    color: #9ca3af;
+  }
+  
+  .text-sm {
+    font-size: 0.875rem;
+  }
+  
+  .flex {
     display: flex;
-    flex-direction: column;
-    gap: 15px;
-}
-
-
-
-.post-card {
-    position: relative; /* Required for positioning child elements */
-    padding: 10px;
-    margin-bottom: 10px;
-    border: 1px solid #ccc;
-    border-radius: 5px;
-}
-
-.reactions {
-    position: relative; /* Position for absolute children */
-}
-
-.reaction-options {
-    display: none; /* Initially hidden */
-    position: absolute; /* Position options relative to reactions container */
-    background: white;
-    border: 1px solid #ccc;
-    border-radius: 5px;
-    padding: 5px;
-    z-index: 10; /* Ensure it's above other elements */
-}
-
-.reactions:hover .reaction-options {
-    display: block; /* Show on hover */
-}
-
-.reaction-button {
-    margin: 0 5px;
-    cursor: pointer;
-}
+  }
+  
+  .justify-end {
+    justify-content: flex-end;
+  }
+  
+  .bg-blue-500 {
+    background-color: #3b82f6;
+  }
+  
+  .text-white {
+    color: white;
+  }
+  
+  .hover\:bg-blue-600:hover {
+    background-color: #2563eb;
+  }
+  
+  .disabled\:opacity-50:disabled {
+    opacity: 0.5;
+  }
+  
+  .disabled\:cursor-not-allowed:disabled {
+    cursor: not-allowed;
+  }
+  
+  .transition-colors {
+    transition: color 0.2s, background-color 0.2s;
+  }
+  
+  .bg-green-50 {
+    background-color: #f0fdf4;
+  }
+  
+  .bg-red-50 {
+    background-color: #fef2f2;
+  }
+  
+  .bg-yellow-50 {
+    background-color: #fffbeb;
+  }
+  
+  .border-green-200 {
+    border-color: #bbf7d0;
+  }
+  
+  .border-red-200 {
+    border-color: #fecaca;
+  }
+  
+  .border-yellow-200 {
+    border-color: #fef08a;
+  }
+  
+  .h-4 {
+    height: 1rem;
+  }
+  
+  .w-4 {
+    width: 1rem;
+  }
+  
+  .text-green-500 {
+    color: #22c55e;
+  }
+  
+  .text-red-500 {
+    color: #ef4444;
+  }
+  
+  .text-yellow-500 {
+    color: #eab308;
+  }
+  
+  .animate-spin {
+    animation: spin 1s linear infinite;
+  }
+  
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  

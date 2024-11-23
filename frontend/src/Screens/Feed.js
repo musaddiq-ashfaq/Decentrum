@@ -100,7 +100,7 @@ const UserFeed = () => {
           <h3>Share with:</h3>
           <div className="user-list">
             {users.map((user) => (
-              <div key={user.email} className="user-item">
+              <div key={user.publicKey} className="user-item">
                 <span>{user.name}</span>
                 <button onClick={() => handleShareWithUser(user)}>Share</button>
               </div>
