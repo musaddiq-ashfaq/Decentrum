@@ -45,12 +45,16 @@ type Post struct {
 	ID            int               `json:"id"`
 	User          User              `json:"user"`
 	Wallet        Wallet            `json:"wallet"`
-	Content       string            `json:"content"`
+	Content       string            `json:"content,omitempty"` // Optional text content
 	Timestamp     time.Time         `json:"timestamp"`
 	Reactions     map[string]string `json:"reactions,omitempty"`
 	ReactionCount int               `json:"reactionCount"`
 	ShareCount    int               `json:"shareCount"`
+	ImageHash 	string    `json:"imageHash,omitempty"` // Add this field for image IPFS hash
+    VideoHash string    `json:"videoHash,omitempty"` // Add this field for video IPFS hash
 }
+
+
 
 var (
 	ipfsShell *shell.Shell
@@ -398,17 +402,36 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 func PostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
-		var post Post
-		if err := json.NewDecoder(r.Body).Decode(&post); err != nil {
-			http.Error(w, "Invalid input. Please check your data.", http.StatusBadRequest)
-			log.Printf("Error decoding request body: %v", err)
+		// Parse multipart form data
+		err := r.ParseMultipartForm(10 << 20) // 10 MB limit
+		if err != nil {
+			http.Error(w, "Error parsing multipart form", http.StatusBadRequest)
+			log.Printf("Error parsing form: %v", err)
 			return
 		}
 
-		// Validate user information
-		if post.Wallet.PublicKey == "" || post.Content == "" {
-			http.Error(w, "User public key and post content are required.", http.StatusBadRequest)
-			log.Println("Missing user public key or post content.")
+		var post Post
+		// Extract user and wallet details
+		post.User.Name = r.FormValue("user.name")
+		post.Wallet.PublicKey = r.FormValue("wallet.publicKey")
+		post.User.PublicKey = post.Wallet.PublicKey
+
+		if post.Wallet.PublicKey == "" {
+			http.Error(w, "User public key is required.", http.StatusBadRequest)
+			log.Println("Missing user public key.")
+			return
+		}
+
+		// Extract post content
+		post.Content = r.FormValue("content")
+
+		// Validate that at least one of content, photo, or video is provided
+		hasPhoto := r.MultipartForm.File["photo"] != nil
+		hasVideo := r.MultipartForm.File["video"] != nil
+
+		if post.Content == "" && !hasPhoto && !hasVideo {
+			http.Error(w, "At least one of content, photo, or video is required.", http.StatusBadRequest)
+			log.Println("No content, photo, or video provided.")
 			return
 		}
 
@@ -426,11 +449,55 @@ func PostHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Generate a unique post ID
+		// Generate a unique post ID and timestamp
 		post.ID = int(time.Now().Unix())
 		post.Timestamp = time.Now()
 
-		// Convert post to JSON
+		// Ensure IPFS is initialized
+		if ipfsShell == nil {
+			ipfsShell = shell.NewShell("localhost:5001")
+		}
+
+		// Upload image or video to IPFS if provided
+		if hasPhoto {
+			file, err := r.MultipartForm.File["photo"][0].Open()
+			if err != nil {
+				http.Error(w, "Failed to open photo file.", http.StatusInternalServerError)
+				log.Printf("Error opening photo file: %v", err)
+				return
+			}
+			defer file.Close()
+
+			ipfsHash, err := ipfsShell.Add(file)
+			if err != nil {
+				http.Error(w, "Failed to store photo in IPFS. Please try again later.", http.StatusInternalServerError)
+				log.Printf("IPFS photo storage error: %v", err)
+				return
+			}
+
+			post.ImageHash = ipfsHash
+		}
+
+		if hasVideo {
+			file, err := r.MultipartForm.File["video"][0].Open()
+			if err != nil {
+				http.Error(w, "Failed to open video file.", http.StatusInternalServerError)
+				log.Printf("Error opening video file: %v", err)
+				return
+			}
+			defer file.Close()
+
+			ipfsHash, err := ipfsShell.Add(file)
+			if err != nil {
+				http.Error(w, "Failed to store video in IPFS. Please try again later.", http.StatusInternalServerError)
+				log.Printf("IPFS video storage error: %v", err)
+				return
+			}
+
+			post.VideoHash = ipfsHash
+		}
+
+		// Serialize the Post struct to JSON and upload it to IPFS
 		postJSON, err := json.Marshal(post)
 		if err != nil {
 			http.Error(w, "Failed to marshal post data", http.StatusInternalServerError)
@@ -438,12 +505,6 @@ func PostHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Ensure IPFS is initialized
-		if ipfsShell == nil {
-			ipfsShell = shell.NewShell("localhost:5001")
-		}
-
-		// Store post content in IPFS
 		ipfsHash, err := ipfsShell.Add(strings.NewReader(string(postJSON)))
 		if err != nil {
 			http.Error(w, "Failed to store post in IPFS. Please try again later.", http.StatusInternalServerError)
@@ -451,13 +512,9 @@ func PostHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Submit the post to the blockchain with retry logic
+		// Submit the post to the blockchain
 		result, err := submitPostWithRetry(post.Wallet.PublicKey, ipfsHash)
 		if err != nil {
-			// If blockchain submission fails after all attempts, unpin the IPFS content
-			if unPinErr := ipfsShell.Unpin(ipfsHash); unPinErr != nil {
-				log.Printf("Warning: Failed to unpin IPFS content after blockchain error: %v", unPinErr)
-			}
 			log.Printf("Failed to store post in blockchain: %v", err)
 			http.Error(w, fmt.Sprintf("Failed to store post in blockchain: %v", err), http.StatusInternalServerError)
 			return
@@ -477,7 +534,6 @@ func PostHandler(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case http.MethodGet:
-		// Existing logic for GET request to fetch posts by user
 		publicKey := r.URL.Query().Get("publicKey")
 		if publicKey == "" {
 			http.Error(w, "Public key is required to fetch posts.", http.StatusBadRequest)
@@ -513,6 +569,8 @@ func PostHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(posts)
 	}
 }
+
+
 
 func FeedHandler(w http.ResponseWriter, r *http.Request) {
 	// Fetch all post hashes from the blockchain (now using PublicKey)
@@ -620,26 +678,26 @@ func verifyUserExists(publicKey string) (bool, error) {
 
 // Helper function to retrieve a post from IPFS by its hash
 func getPostFromIPFS(ipfsHash string) (*Post, error) {
-	// Get the data from IPFS
-	reader, err := ipfsShell.Cat(ipfsHash)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve from IPFS: %v", err)
-	}
-	defer reader.Close()
+    // Get the data from IPFS
+    reader, err := ipfsShell.Cat(ipfsHash)
+    if err != nil {
+        return nil, fmt.Errorf("failed to retrieve from IPFS: %v", err)
+    }
+    defer reader.Close()
 
-	// Read the data
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read IPFS data: %v", err)
-	}
+    // Read the data
+    data, err := io.ReadAll(reader)
+    if err != nil {
+        return nil, fmt.Errorf("failed to read IPFS data: %v", err)
+    }
 
-	// Unmarshal the JSON data into a Post struct
-	var post Post
-	if err := json.Unmarshal(data, &post); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal post data: %v", err)
-	}
+    // Unmarshal the JSON data into a Post struct
+    var post Post
+    if err := json.Unmarshal(data, &post); err != nil {
+        return nil, fmt.Errorf("failed to unmarshal post data: %v", err)
+    }
 
-	return &post, nil
+    return &post, nil
 }
 
 func main() {

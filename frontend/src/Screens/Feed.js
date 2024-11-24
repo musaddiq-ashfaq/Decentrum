@@ -67,23 +67,47 @@ const UserFeed = () => {
       <div className="posts-container">
         {posts.map((post) => (
           <div key={post.id} className="post-card">
-            <h3>{post.user.name}</h3>
+            <h3>{post.user?.name || "Anonymous User"}</h3>
             <p>{post.content}</p>
 
             {/* Check if the post contains an image */}
             {post.imageHash && (
-              <div className="post-image">
-                {/* Assuming the image URL is constructed from the IPFS hash */}
+              <div className="post-media">
                 <img
                   src={`http://localhost:8080/ipfs/${post.imageHash}`}
                   alt="Post content"
-                  style={{ width: "100%", maxHeight: "400px", objectFit: "contain" }}
+                  style={{
+                    width: "100%",
+                    maxHeight: "400px",
+                    objectFit: "contain",
+                    borderRadius: "10px",
+                  }}
                 />
               </div>
             )}
 
+            {/* Check if the post contains a video */}
+            {post.videoHash && (
+              <div className="post-media">
+                <video
+                  controls
+                  style={{
+                    width: "100%",
+                    maxHeight: "400px",
+                    objectFit: "contain",
+                    borderRadius: "10px",
+                  }}
+                >
+                  <source
+                    src={`http://localhost:8080/ipfs/${post.videoHash}`}
+                    type="video/mp4"
+                  />
+                  Your browser does not support the video tag.
+                </video>
+              </div>
+            )}
+
             <div className="reactions">
-              
               <button
                 className="share-button"
                 onClick={() => handleShareClick(post)}
