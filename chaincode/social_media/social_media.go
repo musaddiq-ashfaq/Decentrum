@@ -4,25 +4,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
 // User struct defines the user structure
 // User represents the user structure in the application (including public/private keys)
 type User struct {
-	Name           string `json:"name"`
-	Phone          string `json:"phone"`
-	PublicKey  	   string `json:"publicKey"`
-	
+	Name      string `json:"name"`
+	Phone     string `json:"phone"`
+	PublicKey string `json:"publicKey"`
 }
 
+//	type Post struct {
+//		UserPublicKey     string            `json:"userPublicKey"`
+//		ContentCID    string            `json:"contentCID"`
+//		Timestamp     int64             `json:"timestamp"`
+//		Reactions     map[string]string `json:"reactions"`
+//		ReactionCount int               `json:"reactionCount"`
+//		ShareCount    int                `json:"shareCount"`
+//	}
 type Post struct {
-	UserPublicKey     string            `json:"userPublicKey"`
+	UserPublicKey string            `json:"userPublicKey"`
 	ContentCID    string            `json:"contentCID"`
 	Timestamp     int64             `json:"timestamp"`
 	Reactions     map[string]string `json:"reactions"`
 	ReactionCount int               `json:"reactionCount"`
-	ShareCount    int                `json:"shareCount"`
+	ShareCount    int               `json:"shareCount"`
 }
 
 // SmartContract defines the chaincode structure
@@ -41,14 +49,11 @@ func (s *SmartContract) RegisterUser(ctx contractapi.TransactionContextInterface
 		return fmt.Errorf("user with public key %s already exists", publicKey)
 	}
 
-	
-
 	// Create a new user object
 	user := User{
-		Name:           name,
-		Phone:          phone,
-		PublicKey:  publicKey,
-	
+		Name:      name,
+		Phone:     phone,
+		PublicKey: publicKey,
 	}
 
 	// Convert user struct to JSON
@@ -227,24 +232,68 @@ func (s *SmartContract) GetAllPosts(ctx contractapi.TransactionContextInterface)
 }
 
 // AddReaction allows a user to react to a post
-func (s *SmartContract) AddReaction(ctx contractapi.TransactionContextInterface, postID string, publicKey string, reactionType string) error {
-	post, err := s.GetPost(ctx, postID)
+// func (s *SmartContract) AddReaction(ctx contractapi.TransactionContextInterface, postID string, publicKey string, reactionType string) error {
+// 	post, err := s.GetPost(ctx, postID)
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	// Add or update reaction
+// 	post.Reactions[publicKey] = reactionType
+// 	post.ReactionCount = len(post.Reactions)
+
+// 	// Marshal the updated post
+// 	postJSON, err := json.Marshal(post)
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	// Update the post in state
+// 	return ctx.GetStub().PutState(postID, postJSON)
+// }
+
+func (s *SmartContract) AddReaction(ctx contractapi.TransactionContextInterface, postID string, userPublicKey string, reactionType string) error {
+	// Get the post using composite key
+	postKey, err := ctx.GetStub().CreateCompositeKey("allposts", []string{postID})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create composite key: %v", err)
+	}
+
+	postJSON, err := ctx.GetStub().GetState(postKey)
+	if err != nil {
+		return fmt.Errorf("failed to read post: %v", err)
+	}
+	if postJSON == nil {
+		return fmt.Errorf("post does not exist: %s", postID)
+	}
+
+	var post Post
+	err = json.Unmarshal(postJSON, &post)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal post: %v", err)
+	}
+
+	// Initialize reactions map if nil
+	if post.Reactions == nil {
+		post.Reactions = make(map[string]string)
 	}
 
 	// Add or update reaction
-	post.Reactions[publicKey] = reactionType
+	post.Reactions[userPublicKey] = reactionType
 	post.ReactionCount = len(post.Reactions)
 
-	// Marshal the updated post
-	postJSON, err := json.Marshal(post)
+	// Marshal and store the updated post
+	updatedPostJSON, err := json.Marshal(post)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal post: %v", err)
 	}
 
-	// Update the post in state
-	return ctx.GetStub().PutState(postID, postJSON)
+	err = ctx.GetStub().PutState(postKey, updatedPostJSON)
+	if err != nil {
+		return fmt.Errorf("failed to update post: %v", err)
+	}
+
+	return nil
 }
 
 // GetPostsByUser retrieves all posts created by a specific user
@@ -282,7 +331,6 @@ func (s *SmartContract) GetPostsByUser(ctx contractapi.TransactionContextInterfa
 
 	return posts, nil
 }
-
 
 // main function starts the chaincode
 func main() {

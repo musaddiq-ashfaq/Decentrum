@@ -50,11 +50,9 @@ type Post struct {
 	Reactions     map[string]string `json:"reactions,omitempty"`
 	ReactionCount int               `json:"reactionCount"`
 	ShareCount    int               `json:"shareCount"`
-	ImageHash 	string    `json:"imageHash,omitempty"` // Add this field for image IPFS hash
-    VideoHash string    `json:"videoHash,omitempty"` // Add this field for video IPFS hash
+	ImageHash     string            `json:"imageHash,omitempty"` // Add this field for image IPFS hash
+	VideoHash     string            `json:"videoHash,omitempty"` // Add this field for video IPFS hash
 }
-
-
 
 var (
 	ipfsShell *shell.Shell
@@ -570,8 +568,6 @@ func PostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-
-
 func FeedHandler(w http.ResponseWriter, r *http.Request) {
 	// Fetch all post hashes from the blockchain (now using PublicKey)
 	result, err := contract.EvaluateTransaction("GetAllPosts")
@@ -678,26 +674,86 @@ func verifyUserExists(publicKey string) (bool, error) {
 
 // Helper function to retrieve a post from IPFS by its hash
 func getPostFromIPFS(ipfsHash string) (*Post, error) {
-    // Get the data from IPFS
-    reader, err := ipfsShell.Cat(ipfsHash)
-    if err != nil {
-        return nil, fmt.Errorf("failed to retrieve from IPFS: %v", err)
-    }
-    defer reader.Close()
+	// Get the data from IPFS
+	reader, err := ipfsShell.Cat(ipfsHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve from IPFS: %v", err)
+	}
+	defer reader.Close()
 
-    // Read the data
-    data, err := io.ReadAll(reader)
-    if err != nil {
-        return nil, fmt.Errorf("failed to read IPFS data: %v", err)
-    }
+	// Read the data
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read IPFS data: %v", err)
+	}
 
-    // Unmarshal the JSON data into a Post struct
-    var post Post
-    if err := json.Unmarshal(data, &post); err != nil {
-        return nil, fmt.Errorf("failed to unmarshal post data: %v", err)
-    }
+	// Unmarshal the JSON data into a Post struct
+	var post Post
+	if err := json.Unmarshal(data, &post); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal post data: %v", err)
+	}
 
-    return &post, nil
+	return &post, nil
+}
+
+func ReactionHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse the post ID from the URL
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "Invalid URL", http.StatusBadRequest)
+		return
+	}
+	postID := parts[2]
+
+	// Parse the request body
+	var request struct {
+		UserPublicKey string `json:"userPublicKey"`
+		ReactionType  string `json:"reactionType"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate reaction type
+	validReactions := map[string]bool{
+		"like":      true,
+		"love":      true,
+		"laugh":     true,
+		"angry":     true,
+		"sad":       true,
+		"celebrate": true,
+	}
+
+	if !validReactions[request.ReactionType] {
+		http.Error(w, "Invalid reaction type", http.StatusBadRequest)
+		return
+	}
+
+	// Add the reaction using the smart contract
+	result, err := contract.SubmitTransaction("AddReaction", postID, request.UserPublicKey, request.ReactionType)
+	if err != nil {
+		log.Printf("Failed to add reaction: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to add reaction: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get the updated post from IPFS
+	post, err := getPostFromIPFS(string(result))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get updated post: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Return the updated post
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(post)
 }
 
 func main() {
@@ -713,6 +769,7 @@ func main() {
 	r.HandleFunc("/login", LoginHandler).Methods("POST")
 	r.HandleFunc("/post", PostHandler).Methods("POST")
 	r.HandleFunc("/feed", FeedHandler).Methods("GET")
+	r.HandleFunc("/post/{id}/react", ReactionHandler).Methods("POST")
 
 	// Apply CORS middleware
 	c := cors.New(cors.Options{

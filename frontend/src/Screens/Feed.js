@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import Navbar from "./Navbar"; // Import Navbar
 import "./UserFeed.css"; // Import the CSS file for styling
+import PostReactions from "./PostReactions";
 
 const UserFeed = () => {
   const [posts, setPosts] = useState([]);
@@ -8,8 +9,10 @@ const UserFeed = () => {
   const [loading, setLoading] = useState(true);
   const [showSharePopup, setShowSharePopup] = useState(false);
   const [selectedPost, setSelectedPost] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null); // Add currentUser state
 
   useEffect(() => {
+    // Fetch posts
     const fetchPosts = async () => {
       try {
         const response = await fetch("http://localhost:8081/feed");
@@ -32,6 +35,22 @@ const UserFeed = () => {
     };
 
     fetchPosts();
+
+    // Retrieve current user
+    try {
+      const userDataString = localStorage.getItem("user");
+      if (userDataString) {
+        const userData = JSON.parse(userDataString);
+        setCurrentUser(userData);
+        console.log("Retrieved user data:", userData);
+      } else {
+        setCurrentUser(null);
+      }
+    } catch (error) {
+      console.error("Error parsing localStorage data:", error);
+      setCurrentUser(null);
+      localStorage.clear(); // Clear localStorage if invalid data is found
+    }
   }, []);
 
   const fetchUsers = async () => {
@@ -106,6 +125,18 @@ const UserFeed = () => {
                 </video>
               </div>
             )}
+
+            {/* Post Reactions Component */}
+            <PostReactions
+              post={post}
+              currentUser={currentUser}
+              onReactionUpdate={(updatedPost) => {
+                // Update the posts state with the new post data
+                setPosts(
+                  posts.map((p) => (p.id === updatedPost.id ? updatedPost : p))
+                );
+              }}
+            />
 
             <div className="reactions">
               <button
