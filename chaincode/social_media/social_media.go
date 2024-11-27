@@ -24,6 +24,19 @@ type User struct {
 //		ReactionCount int               `json:"reactionCount"`
 //		ShareCount    int                `json:"shareCount"`
 //	}
+	Name      string `json:"name"`
+	Phone     string `json:"phone"`
+	PublicKey string `json:"publicKey"`
+}
+
+//	type Post struct {
+//		UserPublicKey     string            `json:"userPublicKey"`
+//		ContentCID    string            `json:"contentCID"`
+//		Timestamp     int64             `json:"timestamp"`
+//		Reactions     map[string]string `json:"reactions"`
+//		ReactionCount int               `json:"reactionCount"`
+//		ShareCount    int                `json:"shareCount"`
+//	}
 type Post struct {
 	ID            string            `json:"id"`
 	UserPublicKey string            `json:"userPublicKey"`

@@ -1,3 +1,5 @@
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   AlertCircle,
   CheckCircle2,
@@ -5,8 +7,6 @@ import {
   LogOut,
   Send,
 } from "lucide-react";
-import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import "./Userpost.css";
 
 const Alert = ({ children, className, ...props }) => (
