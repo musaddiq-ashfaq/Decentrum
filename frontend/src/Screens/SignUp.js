@@ -53,7 +53,7 @@ const RegistrationPage = () => {
         // Generate PDF after successful registration
         generatePDF(data.publicKey, data.privateKey,data.signature);
         // Redirect to /info page for collecting additional details
-        window.location.href = '/info';
+        window.location.href = '/login';
       } else {
         const errorData = await response.json();
         setError(errorData.error || 'Failed to register user.');

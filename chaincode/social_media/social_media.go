@@ -4,25 +4,34 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+    "time"
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
 // User struct defines the user structure
 // User represents the user structure in the application (including public/private keys)
 type User struct {
-	Name           string `json:"name"`
-	Phone          string `json:"phone"`
-	PublicKey  	   string `json:"publicKey"`
-	
+	Name      string `json:"name"`
+	Phone     string `json:"phone"`
+	PublicKey string `json:"publicKey"`
 }
 
+//	type Post struct {
+//		UserPublicKey     string            `json:"userPublicKey"`
+//		ContentCID    string            `json:"contentCID"`
+//		Timestamp     int64             `json:"timestamp"`
+//		Reactions     map[string]string `json:"reactions"`
+//		ReactionCount int               `json:"reactionCount"`
+//		ShareCount    int                `json:"shareCount"`
+//	}
 type Post struct {
-	UserPublicKey     string            `json:"userPublicKey"`
+	ID            string            `json:"id"`
+	UserPublicKey string            `json:"userPublicKey"`
 	ContentCID    string            `json:"contentCID"`
 	Timestamp     int64             `json:"timestamp"`
 	Reactions     map[string]string `json:"reactions"`
 	ReactionCount int               `json:"reactionCount"`
-	ShareCount    int                `json:"shareCount"`
+	ShareCount    int               `json:"shareCount"`
 }
 
 // SmartContract defines the chaincode structure
@@ -41,14 +50,11 @@ func (s *SmartContract) RegisterUser(ctx contractapi.TransactionContextInterface
 		return fmt.Errorf("user with public key %s already exists", publicKey)
 	}
 
-	
-
 	// Create a new user object
 	user := User{
-		Name:           name,
-		Phone:          phone,
-		PublicKey:  publicKey,
-	
+		Name:      name,
+		Phone:     phone,
+		PublicKey: publicKey,
 	}
 
 	// Convert user struct to JSON
@@ -106,7 +112,7 @@ func (s *SmartContract) UserExists(ctx contractapi.TransactionContextInterface, 
 	return userJSON != nil, nil
 }
 
-func (s *SmartContract) CreatePost(ctx contractapi.TransactionContextInterface, publicKey string, ipfsHash string) error {
+func (s *SmartContract) CreatePost(ctx contractapi.TransactionContextInterface, publicKey string, ipfsHash string,postID string) error {
 	// Check if the user exists
 	userBytes, err := ctx.GetStub().GetState(publicKey)
 	if err != nil {
@@ -116,11 +122,36 @@ func (s *SmartContract) CreatePost(ctx contractapi.TransactionContextInterface, 
 		return fmt.Errorf("user does not exist: %s", publicKey)
 	}
 
+    // Create a new Post struct
+    post := Post{
+		ID:            postID,
+        UserPublicKey: publicKey,
+        ContentCID:    ipfsHash,
+        Timestamp:     time.Now().Unix(),
+        Reactions:     make(map[string]string),
+        ReactionCount: 0,
+        ShareCount:    0,
+    }
+
+    // Serialize the post
+    postJSON, err := json.Marshal(post)
+    if err != nil {
+        return fmt.Errorf("failed to marshal post: %v", err)
+    }
+
+    // Store the post using the IPFS hash as the key
+    err = ctx.GetStub().PutState(ipfsHash, postJSON)
+    if err != nil {
+        return fmt.Errorf("failed to store post: %v", err)
+    }
+
 	// Create a composite key for posts
 	postsKey, err := ctx.GetStub().CreateCompositeKey("posts", []string{publicKey})
 	if err != nil {
 		return fmt.Errorf("failed to create composite key: %v", err)
 	}
+    
+	log.Printf("Generated posts composite key: %s", postsKey)
 
 	// Get existing posts
 	postsBytes, err := ctx.GetStub().GetState(postsKey)
@@ -154,6 +185,7 @@ func (s *SmartContract) CreatePost(ctx contractapi.TransactionContextInterface, 
 		return fmt.Errorf("failed to create all posts composite key: %v", err)
 	}
 
+	log.Printf("Generated allposts composite key: %s", allPostsKey)
 	// Store the post under the all posts key
 	err = ctx.GetStub().PutState(allPostsKey, []byte(publicKey))
 	if err != nil {
@@ -169,6 +201,8 @@ func (s *SmartContract) CreatePost(ctx contractapi.TransactionContextInterface, 
 
 // GetPost retrieves a post by ID
 func (s *SmartContract) GetPost(ctx contractapi.TransactionContextInterface, postID string) (*Post, error) {
+	log.Printf("Fetching post with ID: %s", postID)
+
 	postJSON, err := ctx.GetStub().GetState(postID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read from world state: %v", err)
@@ -176,7 +210,7 @@ func (s *SmartContract) GetPost(ctx contractapi.TransactionContextInterface, pos
 	if postJSON == nil {
 		return nil, fmt.Errorf("post does not exist: %s", postID)
 	}
-
+    log.Printf("Retrieved post data for ID %s: %s", postID, string(postJSON))
 	var post Post
 	err = json.Unmarshal(postJSON, &post)
 	if err != nil {
@@ -226,26 +260,96 @@ func (s *SmartContract) GetAllPosts(ctx contractapi.TransactionContextInterface)
 	return string(jsonPosts), nil
 }
 
-// AddReaction allows a user to react to a post
-func (s *SmartContract) AddReaction(ctx contractapi.TransactionContextInterface, postID string, publicKey string, reactionType string) error {
-	post, err := s.GetPost(ctx, postID)
-	if err != nil {
-		return err
-	}
 
-	// Add or update reaction
-	post.Reactions[publicKey] = reactionType
-	post.ReactionCount = len(post.Reactions)
+func (s *SmartContract) AddReaction(ctx contractapi.TransactionContextInterface, postID string, userPublicKey string, reactionType string) (*Post, error) {
+    // Retrieve the existing post state directly using the postID (IPFS hash)
+    existingPostJSON, err := ctx.GetStub().GetState(postID)
+    if err != nil {
+        return nil, fmt.Errorf("failed to retrieve post state for postID '%s': %v", postID, err)
+    }
 
-	// Marshal the updated post
-	postJSON, err := json.Marshal(post)
-	if err != nil {
-		return err
-	}
+    // Check if the post exists
+    if existingPostJSON == nil {
+        return nil, fmt.Errorf("post with postID '%s' does not exist", postID)
+    }
 
-	// Update the post in state
-	return ctx.GetStub().PutState(postID, postJSON)
+    // Deserialize the post JSON into the Post struct
+    var post Post
+    err = json.Unmarshal(existingPostJSON, &post)
+    if err != nil {
+        return nil, fmt.Errorf("failed to unmarshal post data for postID '%s': %v", postID, err)
+    }
+
+    // Initialize reactions map if nil
+    if post.Reactions == nil {
+        post.Reactions = make(map[string]string)
+    }
+
+    // Add or update the user's reaction
+    post.Reactions[userPublicKey] = reactionType
+
+    // Update reaction count
+    post.ReactionCount = len(post.Reactions)
+
+    // Serialize the updated post
+    updatedPostJSON, err := json.Marshal(post)
+    if err != nil {
+        return nil, fmt.Errorf("failed to marshal updated post for postID '%s': %v", postID, err)
+    }
+
+    // Save the updated post state
+    err = ctx.GetStub().PutState(postID, updatedPostJSON)
+    if err != nil {
+        return nil, fmt.Errorf("failed to update post state for postID '%s': %v", postID, err)
+    }
+
+    // Return the updated post
+    return &post, nil
 }
+func (s *SmartContract) GetAllUserPosts(ctx contractapi.TransactionContextInterface) (map[string][]string, error) {
+	// Create a map to store all posts, keyed by the user's public key
+	allPosts := make(map[string][]string)
+
+	// Query for all posts using the composite key prefix
+	resultsIterator, err := ctx.GetStub().GetStateByPartialCompositeKey("posts", []string{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve posts: %v", err)
+	}
+	defer resultsIterator.Close()
+
+	// Iterate through the results and collect posts for each user
+	for resultsIterator.HasNext() {
+		queryResponse, err := resultsIterator.Next()
+		if err != nil {
+			return nil, fmt.Errorf("failed to iterate through posts: %v", err)
+		}
+
+		// Extract the public key from the composite key
+		_, compositeKeyParts, err := ctx.GetStub().SplitCompositeKey(queryResponse.Key)
+		if err != nil {
+			return nil, fmt.Errorf("failed to split composite key: %v", err)
+		}
+		if len(compositeKeyParts) == 0 {
+			continue // Skip if the key doesn't contain a public key
+		}
+		publicKey := compositeKeyParts[0]
+
+		// Unmarshal the posts into a list of IPFS hashes
+		var posts []string
+		err = json.Unmarshal(queryResponse.Value, &posts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal posts for user %s: %v", publicKey, err)
+		}
+
+		// Store the posts in the map
+		allPosts[publicKey] = posts
+	}
+
+	return allPosts, nil
+}
+
+
+
 
 // GetPostsByUser retrieves all posts created by a specific user
 func (s *SmartContract) GetPostsByUser(ctx contractapi.TransactionContextInterface, publicKey string) ([]string, error) {
@@ -282,6 +386,7 @@ func (s *SmartContract) GetPostsByUser(ctx contractapi.TransactionContextInterfa
 
 	return posts, nil
 }
+
 
 
 // main function starts the chaincode

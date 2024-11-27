@@ -33,6 +33,8 @@ const AlertDescription = ({ children, className, ...props }) => (
 
 const CreatePost = () => {
   const [content, setContent] = useState("");
+  const [image, setImage] = useState(null);
+  const [video, setVideo] = useState(null);
   const [status, setStatus] = useState("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [wallet, setWallet] = useState(null);
@@ -49,80 +51,72 @@ const CreatePost = () => {
         setCurrentUser(userData);
         console.log("Retrieved user data:", userData);
       } else {
-        console.log("No user data found in localStorage");
         setCurrentUser(null);
       }
 
       if (walletDataString) {
         const walletData = JSON.parse(walletDataString);
-        if (walletData && walletData.publicKey) {
-          setWallet(walletData);
-        }
+        setWallet(walletData);
       }
     } catch (error) {
-      console.error("Error parsing data from localStorage:", error);
+      console.error("Error parsing localStorage data:", error);
       setCurrentUser(null);
       setWallet(null);
-      localStorage.removeItem("user");
-      localStorage.removeItem("userWallet");
+      localStorage.clear();
     }
   }, []);
 
   const handleLogout = () => {
-    // Clear localStorage
-    localStorage.removeItem("user");
-    localStorage.removeItem("userWallet");
-    
-    // Clear state
+    localStorage.clear();
     setCurrentUser(null);
     setWallet(null);
-    
-    // Redirect to home page
     navigate("/");
+  };
+
+  const handleImageChange = (e) => {
+    setImage(e.target.files[0]);
+    setVideo(null); // Clear video if an image is selected
+  };
+
+  const handleVideoChange = (e) => {
+    setVideo(e.target.files[0]);
+    setImage(null); // Clear image if a video is selected
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!content.trim()) {
+    if (!content.trim() && !image && !video) {
       setStatus("error");
-      setErrorMessage("Post content cannot be empty");
+      setErrorMessage("Post must contain text, an image, or a video.");
       return;
     }
 
-    if (!wallet || !wallet.publicKey) {
+    if (!wallet?.publicKey) {
       setStatus("error");
-      setErrorMessage("Please login to create a post");
+      setErrorMessage("Please login to create a post.");
       return;
     }
 
     if (!currentUser) {
       setStatus("error");
-      setErrorMessage("User information is missing");
+      setErrorMessage("User information is missing.");
       return;
     }
 
     setStatus("loading");
 
-    try {
-      const postData = {
-        content: content.trim(),
-        wallet: {
-          publicKey: wallet.publicKey,
-        },
-        user: {
-          name: currentUser.name || "Anonymous",
-          email: currentUser.email || "Unknown",
-        },
-        timestamp: new Date().toISOString(),
-      };
+    const formData = new FormData();
+    formData.append("user.name",currentUser.name)
+    formData.append("content", content.trim());
+    formData.append("wallet.publicKey", wallet.publicKey);
+    if (image) formData.append("photo", image); // Match backend field name
+    if (video) formData.append("video", video); // Match backend field name
 
+    try {
       const response = await fetch("http://localhost:8081/post", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(postData),
+        body: formData,
       });
 
       if (!response.ok) {
@@ -134,36 +128,17 @@ const CreatePost = () => {
       console.log("Post created:", result);
 
       setContent("");
+      setImage(null);
+      setVideo(null);
       setStatus("success");
 
-      // Navigate to /feed after 2 seconds
-      setTimeout(() => {
-        navigate("/feed");
-      }, 2000);
+      setTimeout(() => navigate("/feed"), 2000);
     } catch (error) {
       console.error("Post creation failed:", error);
       setStatus("error");
       setErrorMessage(error.message || "Failed to create post. Please try again.");
     }
   };
-
-  const handleKeyDown = (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-      handleSubmit(e);
-    }
-  };
-
-  if (!wallet) {
-    return (
-      <div className="max-w-2xl mx-auto p-4">
-        <Alert className="bg-yellow-50 border-yellow-200">
-          <AlertCircle className="h-4 w-4 text-yellow-500" />
-          <AlertTitle>Login Required</AlertTitle>
-          <AlertDescription>Please login to create posts</AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
 
   return (
     <div className="max-w-2xl mx-auto p-4 space-y-4">
@@ -178,47 +153,51 @@ const CreatePost = () => {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="relative">
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="What's on your mind? (Press Ctrl + Enter to post)"
-            className="w-full p-4 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none min-h-[120px]"
-            disabled={status === "loading"}
-            maxLength={1000}
+        <textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          placeholder="What's on your mind?"
+          className="w-full p-4 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none min-h-[120px]"
+          maxLength={1000}
+        />
+        <div className="flex gap-4">
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handleImageChange}
+            disabled={!!video}
           />
-          <div className="absolute bottom-3 right-3 text-gray-400 text-sm">
-            {content.length} / 1000
-          </div>
+          <input
+            type="file"
+            accept="video/*"
+            onChange={handleVideoChange}
+            disabled={!!image}
+          />
         </div>
-
-        <div className="flex justify-end">
-          <button
-            type="submit"
-            disabled={!content.trim() || status === "loading"}
-            className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-          >
-            {status === "loading" ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Posting...
-              </>
-            ) : (
-              <>
-                <Send className="h-4 w-4" />
-                Post
-              </>
-            )}
-          </button>
-        </div>
+        <button
+          type="submit"
+          className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 flex items-center gap-2"
+          disabled={status === "loading"}
+        >
+          {status === "loading" ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Posting...
+            </>
+          ) : (
+            <>
+              <Send className="h-4 w-4" />
+              Post
+            </>
+          )}
+        </button>
       </form>
 
       {status === "success" && (
         <Alert className="bg-green-50 border-green-200">
           <CheckCircle2 className="h-4 w-4 text-green-500" />
           <AlertTitle>Success!</AlertTitle>
-          <AlertDescription>Your post was created successfully</AlertDescription>
+          <AlertDescription>Your post was created successfully.</AlertDescription>
         </Alert>
       )}
 
