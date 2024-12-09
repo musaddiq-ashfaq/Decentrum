@@ -1,8 +1,7 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Navbar from "./Navbar"; // Import Navbar
 import PostReactions from "./PostReactions";
 import "./UserFeed.css"; // Import the CSS file for styling
-import PostReactions from "./PostReactions";
 
 const UserFeed = () => {
   const [posts, setPosts] = useState([]);
@@ -52,6 +51,7 @@ const UserFeed = () => {
       setCurrentUser(null);
       localStorage.clear(); // Clear localStorage if invalid data is found
     }
+    
   }, []);
 
   const fetchUsers = async () => {

@@ -1,7 +1,13 @@
+'use client'
+
 import { jsPDF } from 'jspdf'; // Import jsPDF
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import './RegistrationPage.css';
+import { Alert, AlertDescription } from "../Components/ui/alert";
+import { Button } from "../Components/ui/button";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "../Components/ui/card";
+import { Input } from "../Components/ui/input";
+import { Label } from "../Components/ui/label";
 
 const RegistrationPage = () => {
   const [formData, setFormData] = useState({
@@ -20,10 +26,6 @@ const RegistrationPage = () => {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData({ ...formData, [name]: value });
-  };
-
-  const handleFileChange = (e) => {
-    setFormData({ ...formData, documents: e.target.files });
   };
 
   const handleSubmit = async (e) => {
@@ -50,9 +52,10 @@ const RegistrationPage = () => {
           privateKey: data.privateKey,
           signature: data.signature,
         });
+
         // Generate PDF after successful registration
-        generatePDF(data.publicKey, data.privateKey,data.signature);
-        // Redirect to /info page for collecting additional details
+        generatePDF(data.publicKey, data.privateKey, data.signature);
+        // Redirect to /login page
         window.location.href = '/login';
       } else {
         const errorData = await response.json();
@@ -64,64 +67,80 @@ const RegistrationPage = () => {
     }
   };
 
-  const generatePDF = (publicKey, privateKey,signature) => {
+  const generatePDF = (publicKey, privateKey, signature) => {
     const doc = new jsPDF();
-    doc.setFontSize(6);
+    doc.setFontSize(3);
     doc.text('Wallet Details', 20, 20);
-    doc.setFontSize(6);
     doc.text(`Public Key: ${publicKey}`, 20, 40);
     doc.text(`Private Key: ${privateKey}`, 20, 60);
-    doc.text(`Signature: ${signature}`, 20, 80);
+    
 
     // Save PDF with a custom filename
     doc.save('wallet-details.pdf');
   };
 
   return (
-    <div className="container">
-      <div className="form-container">
-        <h1 className="header">Create Account</h1>
-        <form onSubmit={handleSubmit}>
-          <div>
-            <label htmlFor="name" className="label">Name</label>
-            <input
-              id="name"
-              name="name"
-              type="text"
-              placeholder="Enter your name"
-              required
-              className="input"
-              value={formData.name}
-              onChange={handleChange}
-            />
-          </div>
-          
-          <div>
-            <label htmlFor="phone" className="label">Phone</label>
-            <input
-              id="phone"
-              name="phone"
-              type="text"
-              placeholder="Enter your phone number"
-              required
-              className="input"
-              value={formData.phone}
-              onChange={handleChange}
-            />
-          </div>
-         
-         
-          <button type="submit" className="submit-button">Register</button>
-        </form>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-animation p-4">
+      <Card className="w-full max-w-md bg-white/95 shadow-lg backdrop-blur-sm dark:bg-gray-800/95">
+        <CardHeader>
+          <CardTitle className="text-center text-3xl font-bold text-[#052a47] dark:text-white">
+            Create Account
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="name" className="text-sm font-medium text-[#052a47] dark:text-white">
+                Name
+              </Label>
+              <Input
+                id="name"
+                name="name"
+                type="text"
+                placeholder="Enter your name"
+                required
+                value={formData.name}
+                onChange={handleChange}
+                className="border-gray-300 focus:border-[#4dbf38] focus:ring-[#4dbf38] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+              />
+            </div>
 
-        
-        {error && <p className="error-message">{error}</p>}
+            <div className="space-y-2">
+              <Label htmlFor="phone" className="text-sm font-medium text-[#052a47] dark:text-white">
+                Phone
+              </Label>
+              <Input
+                id="phone"
+                name="phone"
+                type="text"
+                placeholder="Enter your phone number"
+                required
+                value={formData.phone}
+                onChange={handleChange}
+                className="border-gray-300 focus:border-[#4dbf38] focus:ring-[#4dbf38] dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+              />
+            </div>
 
-        <p className="login-link">
-          Already have an account?{' '}
-          <Link to="/login" className="login-link-text">Log In</Link>
-        </p>
-      </div>
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
+            <Button type="submit" className="w-full bg-[#052a47] hover:bg-[#03192b] text-white font-semibold py-2 px-4 rounded-md transition duration-300 ease-in-out transform hover:-translate-y-1 hover:shadow-lg">
+              Register
+            </Button>
+          </form>
+        </CardContent>
+        <CardFooter className="flex flex-col space-y-2">
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            Already have an account?{' '}
+            <Link to="/login" className="text-[#4dbf38] hover:text-[#3da029] hover:underline transition duration-300 ease-in-out">
+              Log In
+            </Link>
+          </p>
+        </CardFooter>
+      </Card>
     </div>
   );
 };

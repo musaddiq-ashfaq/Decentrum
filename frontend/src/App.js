@@ -1,10 +1,10 @@
 import { Route, Routes } from 'react-router-dom';
-import Post from './Screens/Post';
+import ChatApp from './Screens/Chat';
+import Feed from './Screens/Feed';
 import Info from './Screens/Info';
-import Feed from './Screens/Feed'
 import LoginPage from "./Screens/Login";
+import Post from './Screens/Post';
 import RegistrationPage from "./Screens/SignUp";
-
 const App = () => {
   return (
     <div>
@@ -16,6 +16,7 @@ const App = () => {
         <Route path="/post" element={<Post />} />
         {/* <Route path="/reaction" element={<Feed />} /> */}
         <Route path="/feed" element={<Feed />} />
+        <Route path="/chat" element={<ChatApp />} />
       </Routes>
     </div>
   );
