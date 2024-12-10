@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -26,6 +28,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"sync"
+	"crypto/sha256"
+	"sort"
+	"bytes"
 )
 
 // User represents the user structure in the application
@@ -40,6 +46,11 @@ type Wallet struct {
 	PublicKey  string `json:"publicKey"`
 	PrivateKey string `json:"privateKey"`
 }
+// In-memory wallet storage
+var walletStore = struct {
+	sync.Mutex
+	wallets []Wallet
+}{}
 
 // Post represents a social media post
 type Post struct {
@@ -76,10 +87,20 @@ type ReactionRequest struct {
 	ReactionType  string `json:"reactionType"`
 }
 
+
+
 var (
 	ipfsShell *shell.Shell
 	contract  *client.Contract
 )
+// var upgrader = websocket.Upgrader{
+// 	CheckOrigin: func(r *http.Request) bool {
+// 		return true
+// 	},
+// }
+
+// var connections = make(map[string]*websocket.Conn)
+
 
 // initFabric initializes the connection to the Fabric network
 func initFabric() error {
@@ -122,7 +143,7 @@ func newGrpcConnection() *grpc.ClientConn {
 	kaOpts := keepalive.ClientParameters{
 		// Time:                10 * time.Second, // Send pings every 10 seconds
 		Time:                20 * time.Second,
-		Timeout:             30 * time.Second, // Wait 30 seconds for ping ack
+		Timeout:             40 * time.Second, // Wait 30 seconds for ping ack
 		PermitWithoutStream: true,             // Send pings even without active streams
 	}
 
@@ -217,21 +238,32 @@ func newSign() identity.Sign {
 	return sign
 }
 
-// generateWallet creates a new wallet with a public-private key pair
 func generateWallet() (*Wallet, error) {
-	priv, pub, err := generateKeys()
-	if err != nil {
-		return nil, err
-	}
+    priv, pub, err := generateKeys()
+    if err != nil {
+        return nil, err
+    }
 
-	privKeyHex := hex.EncodeToString(priv.D.Bytes())
-	pubKeyHex := hex.EncodeToString(pub.X.Bytes()) + hex.EncodeToString(pub.Y.Bytes())
+    // Encode the private key in DER format
+    privKeyBytes, err := x509.MarshalECPrivateKey(priv)
+    if err != nil {
+        return nil, fmt.Errorf("failed to encode private key: %v", err)
+    }
+    privKeyHex := hex.EncodeToString(privKeyBytes)
 
-	return &Wallet{
-		PublicKey:  pubKeyHex,
-		PrivateKey: privKeyHex,
-	}, nil
+    // Encode the public key in DER format
+    pubKeyBytes, err := x509.MarshalPKIXPublicKey(pub)
+    if err != nil {
+        return nil, fmt.Errorf("failed to encode public key: %v", err)
+    }
+    pubKeyHex := hex.EncodeToString(pubKeyBytes)
+
+    return &Wallet{
+        PublicKey:  pubKeyHex,
+        PrivateKey: privKeyHex,
+    }, nil
 }
+
 
 func generateKeys() (*ecdsa.PrivateKey, *ecdsa.PublicKey, error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader) // Use rand.Reader
@@ -276,18 +308,12 @@ func SignUpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Debug: Print incoming user data for validation
-	fmt.Printf("Received user data: %+v\n", user)
-
 	// Generate wallet for the user (Public/Private Key pair)
 	wallet, err := generateWallet()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error generating wallet: %v", err), http.StatusInternalServerError)
 		return
 	}
-
-	// Debug: Print generated wallet information
-	fmt.Printf("Generated wallet: PublicKey = %s, PrivateKey = %s\n", wallet.PublicKey, wallet.PrivateKey)
 
 	// Prepare the user data for the blockchain
 	userData := map[string]interface{}{
@@ -297,49 +323,72 @@ func SignUpHandler(w http.ResponseWriter, r *http.Request) {
 		"privateKey": wallet.PrivateKey,
 	}
 
-	// Debug: Print the user data to be stored on the blockchain
-	fmt.Printf("Storing user data on blockchain: %+v\n", userData)
+	// Save keys to a file named {name}.key
+	keyFilename := fmt.Sprintf("%s.key", user.Name)
+	keyFile, err := os.Create(keyFilename)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error creating key file: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer keyFile.Close()
 
-	// Store the user data in the blockchain using the chaincode "RegisterUser"
+	// Write public and private keys to the file
+	keyData := fmt.Sprintf("PublicKey: %s\nPrivateKey: %s", wallet.PublicKey, wallet.PrivateKey)
+	if _, err := keyFile.WriteString(keyData); err != nil {
+		http.Error(w, fmt.Sprintf("Error writing keys to file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Store the user data in the blockchain 
 	_, err = contract.SubmitTransaction("RegisterUser", user.Name, user.Phone, wallet.PublicKey)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error registering user on blockchain: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// Verify that the data was stored on the blockchain by querying the data
-	// Assuming "GetUser" is a chaincode function to retrieve the user based on their publicKey
-	fmt.Println("Sending Public Key:", wallet.PublicKey)
+	// Verify that the data was stored on the blockchain
 	response, err := contract.EvaluateTransaction("GetUser", wallet.PublicKey)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error fetching user data from blockchain: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// Debug: Print the retrieved blockchain data for validation
-	fmt.Println("Retrieved Blockchain Data:", string(response))
-
 	// Expected user data as a JSON string
-	expectedData := fmt.Sprintf("{\"name\":\"%s\",\"phone\":\"%s\",\"publicKey\":\"%s\"}",
+	expectedData := fmt.Sprintf("{\"name\":\"%s\",\"phone\":\"%s\",\"publicKey\":\"%s\"}", 
 		user.Name, user.Phone, wallet.PublicKey)
 
 	// Compare the expected and actual data
 	if string(response) == expectedData {
-		// Respond with the user data and wallet information
+		// Respond with the user data
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(userData)
 	} else {
-		// If there's a mismatch, print the differences
-		fmt.Println("Mismatch found between expected and retrieved data:")
-		fmt.Println("Expected Data:", expectedData)
-		fmt.Println("Actual Data:", string(response))
-
-		// Respond with an error message
 		http.Error(w, "User data verification failed on blockchain", http.StatusInternalServerError)
 	}
 }
 
+func GetAllUsersHandler(w http.ResponseWriter, r *http.Request) {
+	// Evaluate transaction to get all users from the blockchain
+	response, err := contract.EvaluateTransaction("GetAllUsers")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error fetching users from blockchain: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Parse the JSON response into a slice of User structs
+	var users []User
+	if err := json.Unmarshal(response, &users); err != nil {
+		http.Error(w, fmt.Sprintf("Error parsing users data: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Respond with the list of users
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(users)
+}
+// LoginHandler handles user login and stores keys in the wallet
 func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		PublicKey  string `json:"publicKey"`
@@ -405,6 +454,9 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Store keys in wallet
+	storeInWallet(request.PublicKey, request.PrivateKey)
+
 	// If all checks pass, send a success response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -418,6 +470,29 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(userData)
 }
+
+// storeInWallet adds a key pair to the in-memory wallet store
+func storeInWallet(publicKey, privateKey string) {
+	walletStore.Lock()
+	defer walletStore.Unlock()
+
+	// Check for existing entry
+	for _, wallet := range walletStore.wallets {
+		if wallet.PublicKey == publicKey {
+			fmt.Println("Key pair already exists in wallet.")
+			return
+		}
+	}
+
+	// Add new wallet entry
+	walletStore.wallets = append(walletStore.wallets, Wallet{
+		PublicKey:  publicKey,
+		PrivateKey: privateKey,
+	})
+
+	fmt.Println("Key pair added to wallet.")
+}
+
 
 func PostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -882,6 +957,598 @@ func getPostHashByID(postID string) (string, error) {
 	return "", fmt.Errorf("no post found with post ID: %s", postID)
 }
 
+// SearchUserByName searches the blockchain for a user by their name and retrieves their public key.
+func SearchUserByName(name string, contract *client.Contract) (string, error) {
+    // Query the blockchain for user details.
+    queryResult, err := contract.EvaluateTransaction("QueryUserByName", name)
+    if err != nil {
+        return "", fmt.Errorf("failed to query user: %v", err)
+    }
+
+    // Parse the query result.
+    var user User
+    if err := json.Unmarshal(queryResult, &user); err != nil {
+        return "", fmt.Errorf("failed to unmarshal query result: %v", err)
+    }
+
+    if user.PublicKey == "" {
+        return "", fmt.Errorf("user not found or public key missing")
+    }
+
+    return user.PublicKey, nil
+}
+// Message represents an individual message in a chat
+type Message struct {
+    IPFSHash   string    `json:"ipfsHash"`   // IPFS hash of the encrypted message
+    Signature  string    `json:"signature"`  // Signature for authenticity
+    Sender     string    `json:"sender"`     // Sender's public key
+    Receiver   string    `json:"receiver"`   // Receiver's public key
+    Timestamp  time.Time `json:"timestamp"`  // Time of message
+}
+
+// Chat represents a chat between two users
+type Chat struct {
+    Participants [2]string `json:"participants"` // Public keys of the two participants
+    Messages     []Message `json:"messages"`     // List of messages exchanged
+}
+
+// EncryptMessage encrypts plaintext using ECIES with AES-GCM
+func EncryptMessage(plainText string, publicKey string) (string, error) {
+	// Decode the public key from hex
+	decodedKey, err := hex.DecodeString(publicKey)
+	log.Printf("decoded key %s", decodedKey)
+	if err != nil {
+		return "", fmt.Errorf("invalid public key encoding: %v", err)
+	}
+
+	// Parse the public key
+	pubKey, err := x509.ParsePKIXPublicKey(decodedKey)
+	if err != nil {
+		return "", fmt.Errorf("invalid public key format: %v", err)
+	}
+
+	ecdsaPubKey, ok := pubKey.(*ecdsa.PublicKey)
+	if !ok {
+		return "", fmt.Errorf("invalid public key type")
+	}
+
+	// Generate an ephemeral private key
+	ephemeralPrivKey, err := ecdsa.GenerateKey(ecdsaPubKey.Curve, rand.Reader)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate ephemeral key: %v", err)
+	}
+
+	// Compute shared secret
+	sharedX, _ := ecdsaPubKey.Curve.ScalarMult(ecdsaPubKey.X, ecdsaPubKey.Y, ephemeralPrivKey.D.Bytes())
+
+	// Derive AES key from shared secret (use the first 32 bytes of sharedX)
+	aesKey := sharedX.Bytes()
+	if len(aesKey) > 32 {
+		aesKey = aesKey[:32]
+	}
+
+	// Create AES-GCM cipher
+	block, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to create AES cipher: %v", err)
+	}
+	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create AES-GCM: %v", err)
+	}
+
+	// Generate a random nonce
+	nonce := make([]byte, aesGCM.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", fmt.Errorf("failed to generate nonce: %v", err)
+	}
+
+	// Encrypt the plaintext
+	cipherText := aesGCM.Seal(nil, nonce, []byte(plainText), nil)
+
+	// Marshal ephemeral public key
+	ephemeralPubKey := elliptic.Marshal(ephemeralPrivKey.Curve, ephemeralPrivKey.PublicKey.X, ephemeralPrivKey.PublicKey.Y)
+
+	// Combine ephemeral public key, nonce, and ciphertext
+	encryptedMessage := append(ephemeralPubKey, append(nonce, cipherText...)...)
+
+	log.Printf("Encrypted message length: %d", len(encryptedMessage))  // Add log to check length
+
+	return hex.EncodeToString(encryptedMessage), nil
+}
+
+// DecryptMessage decrypts the encrypted message using ECIES with AES-GCM
+func DecryptMessage(encryptedText string, privateKey string) (string, error) {
+	// Decode the private key
+	decodedKey, err := hex.DecodeString(privateKey)
+	if err != nil {
+		return "", fmt.Errorf("invalid private key encoding: %v", err)
+	}
+
+	// Parse the private key
+	privKey, err := x509.ParseECPrivateKey(decodedKey)
+	if err != nil {
+		return "", fmt.Errorf("invalid private key format: %v", err)
+	}
+
+	// Decode the encrypted message
+	encrypted, err := hex.DecodeString(encryptedText)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode encrypted message: %v", err)
+	}
+
+	// Extract curve details
+	curve := privKey.Curve
+	keySize := (curve.Params().BitSize + 7) / 8
+	ephemeralKeySize := 2*keySize + 1
+
+	// Check if the message is long enough for the ephemeral public key
+	if len(encrypted) < ephemeralKeySize {
+		return "", fmt.Errorf("encrypted message is too short for ephemeral key")
+	}
+
+	// Extract ephemeral public key
+	ephemeralPubKey := encrypted[:ephemeralKeySize]
+	ephemeralX, ephemeralY := elliptic.Unmarshal(curve, ephemeralPubKey)
+	if ephemeralX == nil || ephemeralY == nil {
+		return "", fmt.Errorf("invalid ephemeral public key")
+	}
+
+	// Compute shared secret
+	sharedX, _ := curve.ScalarMult(ephemeralX, ephemeralY, privKey.D.Bytes())
+
+	// Derive AES key
+	aesKey := sharedX.Bytes()
+	if len(aesKey) > 32 {
+		aesKey = aesKey[:32]
+	}
+
+	// Create AES-GCM cipher
+	block, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to create AES block: %v", err)
+	}
+	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create AES-GCM: %v", err)
+	}
+
+	// Validate nonce and ciphertext sizes
+	nonceSize := aesGCM.NonceSize()
+	if len(encrypted) < ephemeralKeySize+nonceSize {
+		return "", fmt.Errorf("encrypted message is too short for nonce")
+	}
+
+	nonce := encrypted[ephemeralKeySize : ephemeralKeySize+nonceSize]
+	cipherText := encrypted[ephemeralKeySize+nonceSize:]
+	if len(cipherText) == 0 {
+		return "", fmt.Errorf("no ciphertext found")
+	}
+
+	// Decrypt the ciphertext
+	plainText, err := aesGCM.Open(nil, nonce, cipherText, nil)
+	if err != nil {
+		return "", fmt.Errorf("decryption failed: %v", err)
+	}
+
+	return string(plainText), nil
+}
+
+
+func SignMessage(plainText string, privateKeyHex string) (string, error) {
+    // Decode the private key from hex
+    privKeyBytes, err := hex.DecodeString(privateKeyHex)
+    if err != nil {
+        return "", fmt.Errorf("invalid private key encoding: %v", err)
+    }
+
+    // Parse the private key from DER format
+    privKey, err := x509.ParseECPrivateKey(privKeyBytes)
+    if err != nil {
+        return "", fmt.Errorf("invalid private key format: %v", err)
+    }
+
+    // Compute the SHA-256 hash of the message
+    hash := sha256.Sum256([]byte(plainText))
+    
+
+    // Sign the hash using the private key
+    r, s, err := ecdsa.Sign(rand.Reader, privKey, hash[:])
+    if err != nil {
+        return "", fmt.Errorf("failed to sign message: %v", err)
+    }
+
+   
+
+    // Encode the signature as "r,s"
+    return fmt.Sprintf("%s,%s", r.String(), s.String()), nil
+}
+
+
+func VerifySignature(plainText string, signature string, publicKeyHex string) (bool, error) {
+    // Decode the public key from hex
+	
+    pubKeyBytes, err := hex.DecodeString(publicKeyHex)
+    if err != nil {
+        return false, fmt.Errorf("invalid public key encoding: %v", err)
+    }
+
+    // Parse the public key from DER format
+    pubKey, err := x509.ParsePKIXPublicKey(pubKeyBytes)
+    if err != nil {
+        return false, fmt.Errorf("invalid public key format: %v", err)
+    }
+
+    // Assert the public key is of type ECDSA
+    ecdsaPubKey, ok := pubKey.(*ecdsa.PublicKey)
+    if !ok {
+        return false, fmt.Errorf("invalid public key type")
+    }
+
+    // Compute the SHA-256 hash of the message
+    hash := sha256.Sum256([]byte(plainText))
+    
+
+    // Split the signature into r and s
+    parts := strings.Split(signature, ",")
+    if len(parts) != 2 {
+        return false, fmt.Errorf("invalid signature format")
+    }
+
+    // Parse r and s as big integers
+	r := new(big.Int)
+	r.SetString(parts[0], 10) // Assign r from the signature
+	s := new(big.Int)
+	s.SetString(parts[1], 10) // Properly assign s from the signature
+	
+	
+
+    // Verify the signature using the public key and hash
+    isValid := ecdsa.Verify(ecdsaPubKey, hash[:], r, s)
+    
+
+    return isValid, nil
+}
+
+
+
+// UploadToIPFS uploads content to IPFS and returns the IPFS hash
+func UploadMessageToIPFS(content string) (string, error) {
+    sh := shell.NewShell("localhost:5001") // Ensure IPFS daemon is running on localhost:5001
+    hash, err := sh.Add(strings.NewReader(content))
+    if err != nil {
+        return "", err
+    }
+    return hash, nil
+}
+func GenerateChatID(participants []string) string {
+    // Sort participants lexicographically (this makes the order consistent)
+    sort.Strings(participants)
+
+    // Concatenate the sorted participant public keys into a single string
+    concatenated := strings.Join(participants, "")
+
+    // Generate the chat ID using SHA-256 hash of the concatenated string
+    chatID := fmt.Sprintf("%x", sha256.Sum256([]byte(concatenated)))
+    return chatID
+}
+
+func SendMessage( chat *Chat, senderPrivateKey string, senderPublicKey string, receiverPublicKey string, plainText string, chatID string) error {
+    // Encrypt the message
+    encryptedMessage, err := EncryptMessage(plainText, receiverPublicKey)
+    if err != nil {
+        return fmt.Errorf("failed to encrypt message: %v", err)
+    }
+
+    // Upload the encrypted message to IPFS
+    ipfsHash, err := UploadMessageToIPFS(encryptedMessage)
+    if err != nil {
+        return fmt.Errorf("failed to upload message to IPFS: %v", err)
+    }
+
+    // Sign the original message
+    signature, err := SignMessage(plainText, senderPrivateKey)
+    if err != nil {
+        return fmt.Errorf("failed to sign message: %v", err)
+    }
+
+    // Prepare the message object
+    message := Message{
+        IPFSHash:  ipfsHash,
+        Signature: signature,
+        Sender:    senderPublicKey,
+        Receiver:  receiverPublicKey,
+        Timestamp: time.Now(),
+    }
+
+    
+
+    // Generate a chat ID (e.g., hash of the participants)
+    // chatID := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(chat.Participants[:], ""))))
+	log.Printf("%s",chatID)
+
+    // Add the message to the blockchain
+    err = AddMessageToBlockchain( chatID, message,senderPublicKey,receiverPublicKey)
+    if err != nil {
+        return fmt.Errorf("failed to add message to blockchain: %v", err)
+    }
+
+    return nil
+}
+func AddMessageToBlockchain(chatID string, message Message, senderPublicKey string, receiverPublicKey string) error {
+    // Convert the message to JSON
+    messageBytes, err := json.Marshal(message)
+    if err != nil {
+        return fmt.Errorf("failed to marshal message: %v", err)
+    }
+
+    // Submit the transaction to the blockchain
+    result, err := contract.SubmitTransaction("AddMessage", chatID, string(messageBytes), senderPublicKey, receiverPublicKey)
+    if err != nil {
+        return fmt.Errorf("failed to submit transaction: %v", err)
+    }
+
+    // Process the blockchain response (result)
+    // If the result is not empty, log it or handle it as necessary
+    if len(result) > 0 {
+        fmt.Printf("Blockchain response: %s\n", result)
+    } else {
+        fmt.Println("Transaction submitted successfully with no response.")
+    }
+
+    return nil
+}
+
+
+
+func FetchFromIPFS(ipfsHash string) (string, error) {
+    sh := shell.NewShell("localhost:5001") // Ensure IPFS daemon is running on localhost:5001
+    file, err := sh.Cat(ipfsHash)
+    if err != nil {
+        return "", fmt.Errorf("failed to fetch file from IPFS: %v", err)
+    }
+
+    // Read the content from IPFS
+    content, err := io.ReadAll(file)
+    if err != nil {
+        return "", fmt.Errorf("failed to read content from IPFS: %v", err)
+    }
+
+    return string(content), nil
+}
+func DecryptAndFetchMessages(chatID string, senderPublicKey string, receiverPublicKey string, senderPrivateKey string, receiverPrivateKey string) ([]string, error) {
+    // Fetch the chat data from the blockchain using the chaincode
+    chat, err := GetChatFromBlockchain(chatID)
+    if err != nil {
+        return nil, fmt.Errorf("failed to fetch chat: %v", err)
+    }
+
+    var decryptedMessages []string
+
+    // For each message in the chat, fetch the IPFS content, decrypt it, and then verify its signature
+    for _, message := range chat.Messages {
+        // Fetch the encrypted message from IPFS
+        encryptedMessage, err := FetchFromIPFS(message.IPFSHash)
+        if err != nil {
+            return nil, fmt.Errorf("failed to fetch message from IPFS: %v", err)
+        }
+
+
+        // Determine which private key to use for decryption
+        var privateKeyToUse string
+        if message.Sender == senderPublicKey {
+            privateKeyToUse = receiverPrivateKey
+        } else {
+            privateKeyToUse = senderPrivateKey
+        }
+
+
+        // Decrypt the message using the chosen private key
+        decryptedMessage, err := DecryptMessage(encryptedMessage, privateKeyToUse)
+        if err != nil {
+            return nil, fmt.Errorf("failed to decrypt message: %v", err)
+        }
+
+
+        // Verify the decrypted message's signature
+        isValid, err := VerifySignature(decryptedMessage, message.Signature, message.Sender)
+        if err != nil || !isValid {
+            if err != nil {
+                log.Printf("Signature verification error: %v", err)
+            }
+            return nil, fmt.Errorf("signature verification failed for decrypted message: %s", decryptedMessage)
+        }
+        log.Printf("Signature verified for decrypted message: %s", decryptedMessage)
+
+        // Add the decrypted message to the result
+        decryptedMessages = append(decryptedMessages, decryptedMessage)
+    }
+
+    return decryptedMessages, nil
+}
+
+
+func GetChatFromBlockchain(chatID string) (*Chat, error) {
+    // Query the blockchain for the chat data
+    result, err := contract.EvaluateTransaction("GetChat", chatID)
+    if err != nil {
+        return nil, fmt.Errorf("failed to fetch chat: %v", err)
+    }
+
+    // Unmarshal the result into a Chat object
+    var chat Chat
+    err = json.Unmarshal(result, &chat)
+    if err != nil {
+        return nil, fmt.Errorf("failed to unmarshal chat data: %v", err)
+    }
+
+    return &chat, nil
+}
+
+
+
+func ChatHandler(w http.ResponseWriter, r *http.Request) {
+    log.Println("ChatHandler invoked")
+
+    if r.Method != http.MethodPost {
+        log.Println("Invalid method. Only POST is allowed")
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+
+    log.Println("Reading raw request body")
+    body, _ := io.ReadAll(r.Body)
+    log.Printf("Raw request body: %s", string(body))
+
+    log.Println("Parsing operation and username")
+    var baseReq struct {
+        Operation string `json:"operation"`
+        Username  string `json:"username"`
+    }
+    err := json.Unmarshal(body, &baseReq)
+    if err != nil || (baseReq.Operation != "send" && baseReq.Operation != "get") {
+        log.Println("Invalid operation or username specified")
+        http.Error(w, "invalid operation or username specified. Use 'send' or 'get'.", http.StatusBadRequest)
+        return
+    }
+    log.Printf("Operation: %s, Username: %s", baseReq.Operation, baseReq.Username)
+
+    log.Println("Loading user keys")
+    userKeys, err := loadKeys(baseReq.Username)
+    if err != nil {
+        log.Printf("Failed to load keys for user %s: %v", baseReq.Username, err)
+        http.Error(w, fmt.Sprintf("failed to load keys for user %s: %v", baseReq.Username, err), http.StatusInternalServerError)
+        return
+    }
+   
+    log.Println("Resetting the request body for further parsing")
+    r.Body = io.NopCloser(bytes.NewBuffer(body))
+
+    if baseReq.Operation == "send" {
+        log.Println("Handling 'send' operation")
+        var sendReq struct {
+            ReceiverUsername string `json:"receiverUsername"`
+            PlainText        string `json:"plainText"`
+        }
+
+        log.Println("Decoding 'send' request")
+        err := json.NewDecoder(r.Body).Decode(&sendReq)
+        if err != nil {
+            log.Println("Invalid request body for 'send'")
+            http.Error(w, "invalid request body for 'send'", http.StatusBadRequest)
+            return
+        }
+        log.Printf("ReceiverUsername: %s, PlainText: %s", sendReq.ReceiverUsername, sendReq.PlainText)
+
+        log.Println("Loading receiver's keys")
+        receiverKeys, err := loadKeys(sendReq.ReceiverUsername)
+        if err != nil {
+            log.Printf("Failed to load keys for receiver %s: %v", sendReq.ReceiverUsername, err)
+            http.Error(w, fmt.Sprintf("failed to load keys for receiver %s: %v", sendReq.ReceiverUsername, err), http.StatusInternalServerError)
+            return
+        }
+        
+
+        participants := []string{userKeys.PublicKey, receiverKeys.PublicKey}
+        chatID := GenerateChatID(participants)
+        log.Printf("Generated chat ID: %s", chatID)
+
+        log.Println("Sending the message")
+        err = SendMessage(&Chat{}, userKeys.PrivateKey, userKeys.PublicKey, receiverKeys.PublicKey, sendReq.PlainText, chatID)
+        if err != nil {
+            log.Printf("Failed to send message: %v", err)
+            http.Error(w, fmt.Sprintf("failed to send message: %v", err), http.StatusInternalServerError)
+            return
+        }
+        log.Println("Message sent successfully")
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(map[string]string{"status": "message sent successfully"})
+        return
+    }
+
+    if baseReq.Operation == "get" {
+        log.Println("Handling 'get' operation")
+        var getReq struct {
+            SenderUsername string `json:"senderUsername"`
+        }
+
+        log.Println("Decoding 'get' request")
+        err := json.NewDecoder(r.Body).Decode(&getReq)
+        if err != nil {
+            log.Println("Invalid request body for 'get'")
+            http.Error(w, "invalid request body for 'get'", http.StatusBadRequest)
+            return
+        }
+        log.Printf("SenderUsername: %s", getReq.SenderUsername)
+
+        log.Println("Loading sender's keys")
+        senderKeys, err := loadKeys(getReq.SenderUsername)
+        if err != nil {
+            log.Printf("Failed to load keys for sender %s: %v", getReq.SenderUsername, err)
+            http.Error(w, fmt.Sprintf("failed to load keys for sender %s: %v", getReq.SenderUsername, err), http.StatusInternalServerError)
+            return
+        }
+        log.Println("Sender's keys loaded successfully")
+        
+        participants := []string{userKeys.PublicKey, senderKeys.PublicKey}
+        chatID := GenerateChatID(participants)
+        log.Printf("Generated chat ID: %s", chatID)
+
+        log.Println("Fetching and decrypting messages")
+        decryptedMessages, err := DecryptAndFetchMessages(chatID, senderKeys.PublicKey, userKeys.PublicKey, senderKeys.PrivateKey, userKeys.PrivateKey)
+        if err != nil {
+            log.Printf("Failed to fetch chat messages: %v", err)
+            http.Error(w, fmt.Sprintf("failed to fetch chat messages: %v", err), http.StatusInternalServerError)
+            return
+        }
+        log.Println("Messages fetched and decrypted successfully %v",decryptedMessages)
+
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(decryptedMessages)
+        return
+    }
+
+    log.Println("Invalid operation specified")
+    http.Error(w, "invalid operation", http.StatusInternalServerError)
+}
+
+
+// Helper function to load and parse keys from a file
+func loadKeys(username string) (struct {
+    PublicKey  string
+    PrivateKey string
+}, error) {
+    var keys struct {
+        PublicKey  string
+        PrivateKey string
+    }
+
+    // Read the key file
+    keyFile := fmt.Sprintf("%s.key", username)
+    content, err := os.ReadFile(keyFile)
+    if err != nil {
+        return keys, fmt.Errorf("failed to read key file: %v", err)
+    }
+
+    // Parse the content for keys
+    lines := strings.Split(string(content), "\n")
+    for _, line := range lines {
+        if strings.HasPrefix(line, "PublicKey:") {
+            keys.PublicKey = strings.TrimSpace(strings.TrimPrefix(line, "PublicKey:"))
+        } else if strings.HasPrefix(line, "PrivateKey:") {
+            keys.PrivateKey = strings.TrimSpace(strings.TrimPrefix(line, "PrivateKey:"))
+        }
+    }
+
+    if keys.PublicKey == "" || keys.PrivateKey == "" {
+        return keys, fmt.Errorf("incomplete keys in file")
+    }
+
+    return keys, nil
+}
+
+
 func main() {
 
 	// Initialize Fabric connection
@@ -897,7 +1564,11 @@ func main() {
 	r.HandleFunc("/post", PostHandler).Methods("POST")
 	r.HandleFunc("/feed", FeedHandler).Methods("GET")
 	r.HandleFunc("/post/{id}/react", ReactionHandler).Methods("POST")
-
+	r.HandleFunc("/users", GetAllUsersHandler).Methods("GET")
+	r.HandleFunc("/chat", ChatHandler)
+	//r.HandleFunc("/getchat", GetChatMessagesHandler)
+    
+	
 	// Apply CORS middleware
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{"*"}, // Replace with specific domains for production
@@ -912,4 +1583,4 @@ func main() {
 	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
-}
+

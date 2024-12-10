@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"time"
+	
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
+	
 )
 
 // User struct defines the user structure
@@ -34,6 +36,20 @@ type Post struct {
 	ReactionCount int               `json:"reactionCount"`
 	ShareCount    int               `json:"shareCount"`
 }
+// Message represents a chat message structure
+// Message structure
+type Message struct {
+	IPFSHash   string `json:"ipfsHash"`
+	Signature  string `json:"signature"`
+	Sender     string `json:"sender"`
+	Receiver   string `json:"receiver"`
+	Timestamp  string `json:"timestamp"`
+}
+type Chat struct {
+    Participants [2]string `json:"participants"` // Public keys of the two participants
+    Messages     []Message `json:"messages"`     // List of messages exchanged
+}
+
 
 // SmartContract defines the chaincode structure
 type SmartContract struct {
@@ -114,6 +130,7 @@ func (s *SmartContract) UserExists(ctx contractapi.TransactionContextInterface, 
 }
 
 func (s *SmartContract) CreatePost(ctx contractapi.TransactionContextInterface, publicKey string, ipfsHash string, postID string) error {
+func (s *SmartContract) CreatePost(ctx contractapi.TransactionContextInterface, publicKey string, ipfsHash string, postID string) error {
 	// Check if the user exists
 	userBytes, err := ctx.GetStub().GetState(publicKey)
 	if err != nil {
@@ -125,7 +142,16 @@ func (s *SmartContract) CreatePost(ctx contractapi.TransactionContextInterface, 
 
 	// Create a new Post struct
 	post := Post{
+	// Create a new Post struct
+	post := Post{
 		ID:            postID,
+		UserPublicKey: publicKey,
+		ContentCID:    ipfsHash,
+		Timestamp:     time.Now().Unix(),
+		Reactions:     make(map[string]string),
+		ReactionCount: 0,
+		ShareCount:    0,
+	}
 		UserPublicKey: publicKey,
 		ContentCID:    ipfsHash,
 		Timestamp:     time.Now().Unix(),
@@ -139,7 +165,17 @@ func (s *SmartContract) CreatePost(ctx contractapi.TransactionContextInterface, 
 	if err != nil {
 		return fmt.Errorf("failed to marshal post: %v", err)
 	}
+	// Serialize the post
+	postJSON, err := json.Marshal(post)
+	if err != nil {
+		return fmt.Errorf("failed to marshal post: %v", err)
+	}
 
+	// Store the post using the IPFS hash as the key
+	err = ctx.GetStub().PutState(ipfsHash, postJSON)
+	if err != nil {
+		return fmt.Errorf("failed to store post: %v", err)
+	}
 	// Store the post using the IPFS hash as the key
 	err = ctx.GetStub().PutState(ipfsHash, postJSON)
 	if err != nil {
@@ -151,6 +187,7 @@ func (s *SmartContract) CreatePost(ctx contractapi.TransactionContextInterface, 
 	if err != nil {
 		return fmt.Errorf("failed to create composite key: %v", err)
 	}
+
 
 	log.Printf("Generated posts composite key: %s", postsKey)
 
@@ -212,6 +249,7 @@ func (s *SmartContract) GetPost(ctx contractapi.TransactionContextInterface, pos
 		return nil, fmt.Errorf("post does not exist: %s", postID)
 	}
 	log.Printf("Retrieved post data for ID %s: %s", postID, string(postJSON))
+	log.Printf("Retrieved post data for ID %s: %s", postID, string(postJSON))
 	var post Post
 	err = json.Unmarshal(postJSON, &post)
 	if err != nil {
@@ -267,7 +305,16 @@ func (s *SmartContract) AddReaction(ctx contractapi.TransactionContextInterface,
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve post state for postID '%s': %v", postID, err)
 	}
+	// Retrieve the existing post state directly using the postID (IPFS hash)
+	existingPostJSON, err := ctx.GetStub().GetState(postID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve post state for postID '%s': %v", postID, err)
+	}
 
+	// Check if the post exists
+	if existingPostJSON == nil {
+		return nil, fmt.Errorf("post with postID '%s' does not exist", postID)
+	}
 	// Check if the post exists
 	if existingPostJSON == nil {
 		return nil, fmt.Errorf("post with postID '%s' does not exist", postID)
@@ -279,7 +326,17 @@ func (s *SmartContract) AddReaction(ctx contractapi.TransactionContextInterface,
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal post data for postID '%s': %v", postID, err)
 	}
+	// Deserialize the post JSON into the Post struct
+	var post Post
+	err = json.Unmarshal(existingPostJSON, &post)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal post data for postID '%s': %v", postID, err)
+	}
 
+	// Initialize reactions map if nil
+	if post.Reactions == nil {
+		post.Reactions = make(map[string]string)
+	}
 	// Initialize reactions map if nil
 	if post.Reactions == nil {
 		post.Reactions = make(map[string]string)
@@ -287,10 +344,19 @@ func (s *SmartContract) AddReaction(ctx contractapi.TransactionContextInterface,
 
 	// Add or update the user's reaction
 	post.Reactions[userPublicKey] = reactionType
+	// Add or update the user's reaction
+	post.Reactions[userPublicKey] = reactionType
 
 	// Update reaction count
 	post.ReactionCount = len(post.Reactions)
+	// Update reaction count
+	post.ReactionCount = len(post.Reactions)
 
+	// Serialize the updated post
+	updatedPostJSON, err := json.Marshal(post)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal updated post for postID '%s': %v", postID, err)
+	}
 	// Serialize the updated post
 	updatedPostJSON, err := json.Marshal(post)
 	if err != nil {
@@ -302,7 +368,14 @@ func (s *SmartContract) AddReaction(ctx contractapi.TransactionContextInterface,
 	if err != nil {
 		return nil, fmt.Errorf("failed to update post state for postID '%s': %v", postID, err)
 	}
+	// Save the updated post state
+	err = ctx.GetStub().PutState(postID, updatedPostJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update post state for postID '%s': %v", postID, err)
+	}
 
+	// Return the updated post
+	return &post, nil
 	// Return the updated post
 	return &post, nil
 }
@@ -384,6 +457,144 @@ func (s *SmartContract) GetPostsByUser(ctx contractapi.TransactionContextInterfa
 	return posts, nil
 }
 
+
+// QueryUserByName retrieves a user by their name
+func (s *SmartContract) QueryUserByName(ctx contractapi.TransactionContextInterface, name string) (*User, error) {
+	// Get all keys from the ledger
+	resultsIterator, err := ctx.GetStub().GetStateByRange("", "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve states from ledger: %v", err)
+	}
+	defer resultsIterator.Close()
+
+	// Iterate through all ledger entries
+	for resultsIterator.HasNext() {
+		queryResponse, err := resultsIterator.Next()
+		if err != nil {
+			return nil, fmt.Errorf("error iterating through ledger states: %v", err)
+		}
+
+		// Parse the user JSON
+		var user User
+		if err := json.Unmarshal(queryResponse.Value, &user); err != nil {
+			continue // Ignore invalid entries
+		}
+
+		// Check if the name matches
+		if user.Name == name {
+			return &user, nil
+		}
+	}
+
+	return nil, fmt.Errorf("user with name %s not found", name)
+}
+
+func (s *SmartContract) AddMessage(ctx contractapi.TransactionContextInterface, chatID string, message string, senderPublicKey string, receiverPublicKey string) error {
+    // Retrieve existing chat data
+    chatData, err := ctx.GetStub().GetState(chatID)
+    if err != nil {
+        return fmt.Errorf("failed to get chat: %v", err)
+    }
+
+    var chat Chat
+    if len(chatData) == 0 {
+        // Create a new chat if it doesn't exist
+		
+        chat = Chat{
+            Participants: [2]string{senderPublicKey, receiverPublicKey}, // Add sender and receiver to participants
+            Messages:     []Message{},
+        }
+    } else {
+		log.Printf("i am here")
+        // Unmarshal existing chat data
+        err = json.Unmarshal(chatData, &chat)
+        if err != nil {
+            return fmt.Errorf("failed to unmarshal chat data: %v", err)
+        }
+    }
+
+    // Unmarshal the new message
+    var newMessage Message
+    err = json.Unmarshal([]byte(message), &newMessage)
+    if err != nil {
+        return fmt.Errorf("failed to unmarshal message data: %v", err)
+    }
+
+    // Append the new message
+    chat.Messages = append(chat.Messages, newMessage)
+
+    // Update the state
+    chatBytes, err := json.Marshal(chat)
+    if err != nil {
+        return fmt.Errorf("failed to marshal chat: %v", err)
+    }
+
+    // Store the updated chat data in the blockchain state
+    err = ctx.GetStub().PutState(chatID, chatBytes)
+    if err != nil {
+        return fmt.Errorf("failed to store updated chat: %v", err)
+    }
+
+    // Fire an event to notify the client
+    eventPayload := fmt.Sprintf("Message added to chat %s", chatID)
+    err = ctx.GetStub().SetEvent("MessageAddedEvent", []byte(eventPayload))
+    if err != nil {
+        return fmt.Errorf("failed to set event: %v", err)
+    }
+
+    return nil
+}
+
+
+// GetChat retrieves a chat with all its messages using the chatID
+func (s *SmartContract) GetChat(ctx contractapi.TransactionContextInterface, chatID string) (*Chat, error) {
+    // Retrieve the chat data from the state
+    chatData, err := ctx.GetStub().GetState(chatID)
+    if err != nil {
+        return nil, fmt.Errorf("failed to get chat: %v", err)
+    }
+
+    if len(chatData) == 0 {
+        return nil, fmt.Errorf("chat with ID %s not found", chatID)
+    }
+
+    var chat Chat
+    err = json.Unmarshal(chatData, &chat)
+    if err != nil {
+        return nil, fmt.Errorf("failed to unmarshal chat data: %v", err)
+    }
+
+    return &chat, nil
+}
+
+func (s *SmartContract) GetAllUsers(ctx contractapi.TransactionContextInterface) ([]*User, error) {
+	// Range query with empty string for startKey and endKey does a full scan
+	resultsIterator, err := ctx.GetStub().GetStateByRange("", "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get state iterator: %v", err)
+	}
+	defer resultsIterator.Close()
+
+	var users []*User
+	for resultsIterator.HasNext() {
+		queryResponse, err := resultsIterator.Next()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get next query result: %v", err)
+		}
+
+		var user User
+		err = json.Unmarshal(queryResponse.Value, &user)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unmarshal user: %v", err)
+		}
+		users = append(users, &user)
+	}
+
+	return users, nil
+}
+
+
+
 // main function starts the chaincode
 func main() {
 	chaincode, err := contractapi.NewChaincode(&SmartContract{})
@@ -397,3 +608,4 @@ func main() {
 		fmt.Printf("Error starting chaincode: %v", err)
 	}
 }
+

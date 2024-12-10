@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Navbar from "./Navbar"; // Import Navbar
 import PostReactions from "./PostReactions";
 import "./UserFeed.css"; // Import the CSS file for styling
@@ -43,6 +43,7 @@ const UserFeed = () => {
     } catch (error) {
       console.error("Error parsing localStorage data:", error);
     }
+    
   }, []);
 
   const handleReactionUpdate = (updatedPost) => {
