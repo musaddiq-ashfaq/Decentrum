@@ -1,0 +1,28 @@
+.reaction-button {
+    background-color: transparent;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.reaction-picker {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.reaction-option {
+    cursor: pointer;
+}
+
+.total-reactions {
+    font-size: 0.9em;
+    color: #555;
+}
+
+.error-message {
+    color: red;
+    margin-top: 10px;
+}

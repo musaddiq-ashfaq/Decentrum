@@ -14,9 +14,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
-    "strconv" 
 
 	"github.com/gorilla/mux"
 	"github.com/hyperledger/fabric-gateway/pkg/client"
@@ -43,17 +43,37 @@ type Wallet struct {
 
 // Post represents a social media post
 type Post struct {
-	ID            int               `json:"id"`
-	User          User              `json:"user"`
-	Wallet        Wallet            `json:"wallet"`
-	Content       string            `json:"content,omitempty"` // Optional text content
-	Timestamp     time.Time         `json:"timestamp"`
-	Reactions     map[string]string `json:"reactions,omitempty"`
-	ReactionCount int               `json:"reactionCount"`
-	ShareCount    int               `json:"shareCount"`
-	ImageHash     string            `json:"imageHash,omitempty"` // Add this field for image IPFS hash
-	VideoHash     string            `json:"videoHash,omitempty"` // Add this field for video IPFS hash
-	IPFSHASH      string            `json:"ipfsHASH,omitempty"`
+	ID             int               `json:"id"`
+	User           User              `json:"user"`
+	Wallet         Wallet            `json:"wallet"`
+	Content        string            `json:"content,omitempty"` // Optional text content
+	Timestamp      time.Time         `json:"timestamp"`
+	Reactions      map[string]string `json:"reactions,omitempty"`
+	ReactionCount  int               `json:"reactionCount"`
+	ShareCount     int               `json:"shareCount"`
+	ImageHash      string            `json:"imageHash,omitempty"` // Add this field for image IPFS hash
+	VideoHash      string            `json:"videoHash,omitempty"` // Add this field for video IPFS hash
+	IPFSHASH       string            `json:"ipfsHASH,omitempty"`
+	ReactionCounts map[string]int    `json:"reactionCounts,omitempty"`
+}
+
+// type Post struct {
+// 	ID            int               `json:"id"`
+// 	User          User              `json:"user"`
+// 	Wallet        Wallet            `json:"wallet"`
+// 	Content       string            `json:"content,omitempty"`
+// 	Timestamp     time.Time         `json:"timestamp"`
+// 	Reactions     map[string]string `json:"reactions,omitempty"` // UserPublicKey -> ReactionType
+// 	ReactionCount int               `json:"reactionCount"`       // Total reaction count
+// 	ShareCount    int               `json:"shareCount"`
+// 	ImageHash     string            `json:"imageHash,omitempty"`
+// 	VideoHash     string            `json:"videoHash,omitempty"`
+// 	IPFSHASH      string            `json:"ipfsHASH,omitempty"`
+// }
+
+type ReactionRequest struct {
+	UserPublicKey string `json:"userPublicKey"`
+	ReactionType  string `json:"reactionType"`
 }
 
 var (
@@ -451,7 +471,7 @@ func PostHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Generate a unique post ID and timestamp
 		post.ID = int(time.Now().Unix())
-		postID :=strconv.Itoa(post.ID)
+		postID := strconv.Itoa(post.ID)
 		post.Timestamp = time.Now()
 
 		// Ensure IPFS is initialized
@@ -512,10 +532,10 @@ func PostHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("IPFS storage error: %v", err)
 			return
 		}
-        
+
 		post.IPFSHASH = ipfsHash
 		// Submit the post to the blockchain
-		result, err := submitPostWithRetry(post.Wallet.PublicKey, post.IPFSHASH,postID)
+		result, err := submitPostWithRetry(post.Wallet.PublicKey, post.IPFSHASH, postID)
 		if err != nil {
 			log.Printf("Failed to store post in blockchain: %v", err)
 			http.Error(w, fmt.Sprintf("Failed to store post in blockchain: %v", err), http.StatusInternalServerError)
@@ -622,7 +642,7 @@ func submitPostWithRetry(publicKey string, ipfsHash string, postID string) ([]by
 		// Create a new transaction proposal
 		transaction, err := contract.NewProposal(
 			"CreatePost",
-			client.WithArguments(publicKey, ipfsHash,postID),
+			client.WithArguments(publicKey, ipfsHash, postID),
 		)
 		if err != nil {
 			log.Printf("Failed to create transaction proposal: %v", err)
@@ -701,99 +721,114 @@ func getPostFromIPFS(ipfsHash string) (*Post, error) {
 }
 
 func ReactionHandler(w http.ResponseWriter, r *http.Request) {
+	log.Println("ReactionHandler invoked")
+
+	// Ensure the method is POST
 	if r.Method != http.MethodPost {
+		log.Printf("Invalid HTTP method: %s. Expected POST.", r.Method)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Parse the post ID from the URL 
+	// Extract the post ID from the URL
 	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 4 {
-		http.Error(w, "Invalid URL", http.StatusBadRequest)
+	if len(parts) < 3 {
+		log.Println("Invalid URL format. Expected: /post/<postID>/react")
+		http.Error(w, "Invalid URL format", http.StatusBadRequest)
 		return
 	}
-	postID := parts[2] // Corrected index to parts[3]
+	postID := parts[2]
+	log.Printf("Post ID extracted: %s", postID)
 
-	// Retrieve post hash using postID
-	
-
-	// Parse the request body 
-	var request struct {
-		UserPublicKey string `json:"userPublicKey"`
-		ReactionType  string `json:"reactionType"`
-
-	}
-    
-
-	// Decode the request body and handle potential errors 
+	// Parse the request body
+	var request ReactionRequest
 	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
+	decoder.DisallowUnknownFields() // Prevent unknown fields in JSON
 	if err := decoder.Decode(&request); err != nil {
+		log.Printf("Error decoding request body: %v", err)
 		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	log.Printf("Request parsed: UserPublicKey=%s, ReactionType=%s", request.UserPublicKey, request.ReactionType)
 
-	
-
-	// Validate input fields 
+	// Validate user public key
 	if request.UserPublicKey == "" {
+		log.Println("UserPublicKey is missing in the request")
 		http.Error(w, "User public key is required", http.StatusBadRequest)
 		return
 	}
 
-	// Validate reaction type 
+	// Validate reaction type
 	validReactions := map[string]bool{
-		"like":      true,
-		"love":      true,
-		"laugh":     true,
-		"angry":     true,
-		"sad":       true,
-		"celebrate": true,
+		"like":  true,
+		"love":  true,
+		"laugh": true,
+		"angry": true,
+		"sad":   true,
 	}
-
 	if !validReactions[request.ReactionType] {
+		log.Printf("Invalid ReactionType: %s", request.ReactionType)
 		http.Error(w, "Invalid reaction type", http.StatusBadRequest)
 		return
 	}
 
-    
+	// Retrieve post hash using postID
 	postHash, err := getPostHashByID(postID)
 	if err != nil {
-		log.Printf("Failed to retrieve post hash: %v. PostID: %s", err, postID)
+		log.Printf("Failed to retrieve post hash for PostID=%s: %v", postID, err)
 		http.Error(w, "Post not found", http.StatusNotFound)
 		return
 	}
+	log.Printf("Post hash retrieved: %s", postHash)
 
-	// Add the reaction using the smart contract 
-	log.Printf("Submitting transaction: AddReaction with PostHash: %s, UserPublicKey: %s, ReactionType: %s", postHash, request.UserPublicKey, request.ReactionType)
-	result, err := contract.SubmitTransaction("AddReaction", postHash, request.UserPublicKey, request.ReactionType)
-	if err != nil {
-		log.Printf("Failed to add reaction: %v. PostHash: %s, UserPublicKey: %s, ReactionType: %s", err, postHash, request.UserPublicKey, request.ReactionType)
-		http.Error(w, "Failed to add reaction: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Verify result is not empty 
-	if len(result) == 0 {
-		log.Printf("Empty result from AddReaction transaction. PostHash: %s", postHash)
-		http.Error(w, "No response from reaction submission", http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("AddReaction transaction successful. Result: %s", string(result))
-
-	// Get the updated post from IPFS 
+	// Retrieve the post from IPFS
 	post, err := getPostFromIPFS(postHash)
 	if err != nil {
-		log.Printf("Failed to get updated post from IPFS: %v. PostHash: %s", err, postHash)
-		http.Error(w, "Failed to retrieve updated post", http.StatusInternalServerError)
+		log.Printf("Failed to fetch post from IPFS. PostHash=%s, Error=%v", postHash, err)
+		http.Error(w, "Failed to retrieve post data", http.StatusInternalServerError)
 		return
 	}
 
-	// Return the updated post 
+	// Update the reaction for the user
+	if post.Reactions == nil {
+		post.Reactions = make(map[string]string)
+	}
+	oldReaction := post.Reactions[request.UserPublicKey]
+	post.Reactions[request.UserPublicKey] = request.ReactionType
+
+	// Recalculate reaction counts
+	if post.ReactionCounts == nil {
+		post.ReactionCounts = make(map[string]int)
+	}
+	if oldReaction != "" {
+		post.ReactionCounts[oldReaction]--
+	}
+	post.ReactionCounts[request.ReactionType]++
+	post.ReactionCount = len(post.Reactions)
+
+	log.Printf("Updated reactions for post %d: %+v", post.ID, post.ReactionCounts)
+
+	// Serialize the updated post to JSON and store it back in IPFS
+	postJSON, err := json.Marshal(post)
+	if err != nil {
+		log.Printf("Failed to marshal updated post. Error=%v", err)
+		http.Error(w, "Failed to update post data", http.StatusInternalServerError)
+		return
+	}
+
+	updatedIPFSHash, err := ipfsShell.Add(strings.NewReader(string(postJSON)))
+	if err != nil {
+		log.Printf("Failed to store updated post in IPFS. Error=%v", err)
+		http.Error(w, "Failed to store updated post in IPFS", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Updated post stored in IPFS with hash: %s", updatedIPFSHash)
+
+	// Respond with the updated post
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(post); err != nil {
-		log.Printf("Failed to encode post: %v. Post: %+v", err, post)
+		log.Printf("Failed to encode updated post response. Error=%v", err)
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
@@ -802,52 +837,50 @@ func ReactionHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func getPostHashByID(postID string) (string, error) {
-    // Step 1: Query the blockchain for all posts
-    result, err := contract.EvaluateTransaction("GetAllUserPosts")
-    if err != nil {
-        return "", fmt.Errorf("failed to evaluate transaction: %v", err)
-    }
+	// Step 1: Query the blockchain for all posts
+	result, err := contract.EvaluateTransaction("GetAllUserPosts")
+	if err != nil {
+		return "", fmt.Errorf("failed to evaluate transaction: %v", err)
+	}
 
-    // Step 2: Parse the result into a map of posts grouped by public key
-    var allPosts map[string][]string
-    if err := json.Unmarshal(result, &allPosts); err != nil {
-        return "", fmt.Errorf("failed to unmarshal result: %v", err)
-    }
-    log.Printf("All Posts: %+v", allPosts)
+	// Step 2: Parse the result into a map of posts grouped by public key
+	var allPosts map[string][]string
+	if err := json.Unmarshal(result, &allPosts); err != nil {
+		return "", fmt.Errorf("failed to unmarshal result: %v", err)
+	}
+	log.Printf("All Posts: %+v", allPosts)
 
-    // Convert postID to integer
-    postIDInt, err := strconv.Atoi(postID)
-    if err != nil {
-        return "", fmt.Errorf("invalid postID format: %v", err)
-    }
+	// Convert postID to integer
+	postIDInt, err := strconv.Atoi(postID)
+	if err != nil {
+		return "", fmt.Errorf("invalid postID format: %v", err)
+	}
 
-    // Step 3: Iterate through all users' posts
-    for _, postHashes := range allPosts {
-        for _, hash := range postHashes {
-            // Call getPostFromIPFS function to fetch the post from IPFS
-            post, err := getPostFromIPFS(hash)
-            if err != nil {
-                log.Printf("Failed to retrieve post for hash %s: %v", hash, err)
-                continue // Skip this hash if retrieval fails
-            }
+	// Step 3: Iterate through all users' posts
+	for _, postHashes := range allPosts {
+		for _, hash := range postHashes {
+			// Call getPostFromIPFS function to fetch the post from IPFS
+			post, err := getPostFromIPFS(hash)
+			if err != nil {
+				log.Printf("Failed to retrieve post for hash %s: %v", hash, err)
+				continue // Skip this hash if retrieval fails
+			}
 
-            log.Printf("Checking post with POST ID: %d", post.ID)
+			log.Printf("Checking post with POST ID: %d", post.ID)
 
-            // Step 4: Match the postID
-            if post.ID == postIDInt {
-                if hash != "" {
-                    return hash, nil
-                }
-                return "", fmt.Errorf("post found but IPFS hash is empty for post ID: %s", postID)
-            }
-        }
-    }
+			// Step 4: Match the postID
+			if post.ID == postIDInt {
+				if hash != "" {
+					return hash, nil
+				}
+				return "", fmt.Errorf("post found but IPFS hash is empty for post ID: %s", postID)
+			}
+		}
+	}
 
-    // If no matching post is found, return an error
-    return "", fmt.Errorf("no post found with post ID: %s", postID)
+	// If no matching post is found, return an error
+	return "", fmt.Errorf("no post found with post ID: %s", postID)
 }
-
-
 
 func main() {
 
@@ -855,6 +888,7 @@ func main() {
 	if err := initFabric(); err != nil {
 		log.Fatalf("Error initializing Fabric: %v", err)
 	}
+	ipfsShell = shell.NewShell("localhost:5001")
 
 	// Register handlers
 	r := mux.NewRouter()
