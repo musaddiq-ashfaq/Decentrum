@@ -7,6 +7,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -20,6 +21,11 @@ import (
 	"strings"
 	"time"
 
+	"bytes"
+	"crypto/sha256"
+	"sort"
+	"sync"
+
 	"github.com/gorilla/mux"
 	"github.com/hyperledger/fabric-gateway/pkg/client"
 	"github.com/hyperledger/fabric-gateway/pkg/identity"
@@ -28,10 +34,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
-	"sync"
-	"crypto/sha256"
-	"sort"
-	"bytes"
 )
 
 // User represents the user structure in the application
@@ -46,6 +48,7 @@ type Wallet struct {
 	PublicKey  string `json:"publicKey"`
 	PrivateKey string `json:"privateKey"`
 }
+
 // In-memory wallet storage
 var walletStore = struct {
 	sync.Mutex
@@ -54,45 +57,42 @@ var walletStore = struct {
 
 // Post represents a social media post
 type Post struct {
-	ID             int               `json:"id"`
-	User           User              `json:"user"`
-	Wallet         Wallet            `json:"wallet"`
-	Content        string            `json:"content,omitempty"` // Optional text content
-	Timestamp      time.Time         `json:"timestamp"`
-	Reactions      map[string]string `json:"reactions,omitempty"`
-	ReactionCount  int               `json:"reactionCount"`
-	ShareCount     int               `json:"shareCount"`
-	ImageHash      string            `json:"imageHash,omitempty"` // Add this field for image IPFS hash
-	VideoHash      string            `json:"videoHash,omitempty"` // Add this field for video IPFS hash
-	IPFSHASH       string            `json:"ipfsHASH,omitempty"`
-	ReactionCounts map[string]int    `json:"reactionCounts,omitempty"`
+	ID            int               `json:"id"`
+	User          User              `json:"user"`
+	Wallet        Wallet            `json:"wallet"`
+	Content       string            `json:"content,omitempty"` // Optional text content
+	Timestamp     time.Time         `json:"timestamp"`
+	Reactions     map[string]string `json:"reactions,omitempty"`
+	ReactionCount int               `json:"reactionCount"`
+	ShareCount    int               `json:"shareCount"`
+	ImageHash     string            `json:"imageHash,omitempty"` // Add this field for image IPFS hash
+	VideoHash     string            `json:"videoHash,omitempty"` // Add this field for video IPFS hash
+	IPFSHASH      string            `json:"ipfsHASH,omitempty"`
 }
-
-// type Post struct {
-// 	ID            int               `json:"id"`
-// 	User          User              `json:"user"`
-// 	Wallet        Wallet            `json:"wallet"`
-// 	Content       string            `json:"content,omitempty"`
-// 	Timestamp     time.Time         `json:"timestamp"`
-// 	Reactions     map[string]string `json:"reactions,omitempty"` // UserPublicKey -> ReactionType
-// 	ReactionCount int               `json:"reactionCount"`       // Total reaction count
-// 	ShareCount    int               `json:"shareCount"`
-// 	ImageHash     string            `json:"imageHash,omitempty"`
-// 	VideoHash     string            `json:"videoHash,omitempty"`
-// 	IPFSHASH      string            `json:"ipfsHASH,omitempty"`
-// }
-
-type ReactionRequest struct {
-	UserPublicKey string `json:"userPublicKey"`
-	ReactionType  string `json:"reactionType"`
-}
-
-
 
 var (
 	ipfsShell *shell.Shell
 	contract  *client.Contract
 )
+
+type FriendRequest struct {
+	Sender       string `json:"sender"`
+	SenderName   string `json:"senderName"`
+	Receiver     string `json:"receiver"`
+	ReceiverName string `json:"receiverName"`
+	Status       string `json:"status"` // "pending", "accepted", "rejected"
+	Timestamp    int64  `json:"timestamp"`
+}
+
+type FriendsList struct {
+	Friends []string `json:"friends"`
+}
+
+type Friend struct {
+	PublicKey string `json:"publicKey"`
+	Name      string `json:"name"`
+}
+
 // var upgrader = websocket.Upgrader{
 // 	CheckOrigin: func(r *http.Request) bool {
 // 		return true
@@ -100,7 +100,6 @@ var (
 // }
 
 // var connections = make(map[string]*websocket.Conn)
-
 
 // initFabric initializes the connection to the Fabric network
 func initFabric() error {
@@ -239,31 +238,30 @@ func newSign() identity.Sign {
 }
 
 func generateWallet() (*Wallet, error) {
-    priv, pub, err := generateKeys()
-    if err != nil {
-        return nil, err
-    }
+	priv, pub, err := generateKeys()
+	if err != nil {
+		return nil, err
+	}
 
-    // Encode the private key in DER format
-    privKeyBytes, err := x509.MarshalECPrivateKey(priv)
-    if err != nil {
-        return nil, fmt.Errorf("failed to encode private key: %v", err)
-    }
-    privKeyHex := hex.EncodeToString(privKeyBytes)
+	// Encode the private key in DER format
+	privKeyBytes, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode private key: %v", err)
+	}
+	privKeyHex := hex.EncodeToString(privKeyBytes)
 
-    // Encode the public key in DER format
-    pubKeyBytes, err := x509.MarshalPKIXPublicKey(pub)
-    if err != nil {
-        return nil, fmt.Errorf("failed to encode public key: %v", err)
-    }
-    pubKeyHex := hex.EncodeToString(pubKeyBytes)
+	// Encode the public key in DER format
+	pubKeyBytes, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode public key: %v", err)
+	}
+	pubKeyHex := hex.EncodeToString(pubKeyBytes)
 
-    return &Wallet{
-        PublicKey:  pubKeyHex,
-        PrivateKey: privKeyHex,
-    }, nil
+	return &Wallet{
+		PublicKey:  pubKeyHex,
+		PrivateKey: privKeyHex,
+	}, nil
 }
-
 
 func generateKeys() (*ecdsa.PrivateKey, *ecdsa.PublicKey, error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader) // Use rand.Reader
@@ -339,7 +337,7 @@ func SignUpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store the user data in the blockchain 
+	// Store the user data in the blockchain
 	_, err = contract.SubmitTransaction("RegisterUser", user.Name, user.Phone, wallet.PublicKey)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error registering user on blockchain: %v", err), http.StatusInternalServerError)
@@ -354,7 +352,7 @@ func SignUpHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Expected user data as a JSON string
-	expectedData := fmt.Sprintf("{\"name\":\"%s\",\"phone\":\"%s\",\"publicKey\":\"%s\"}", 
+	expectedData := fmt.Sprintf("{\"name\":\"%s\",\"phone\":\"%s\",\"publicKey\":\"%s\"}",
 		user.Name, user.Phone, wallet.PublicKey)
 
 	// Compare the expected and actual data
@@ -388,6 +386,7 @@ func GetAllUsersHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(users)
 }
+
 // LoginHandler handles user login and stores keys in the wallet
 func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	var request struct {
@@ -492,7 +491,6 @@ func storeInWallet(publicKey, privateKey string) {
 
 	fmt.Println("Key pair added to wallet.")
 }
-
 
 func PostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -796,114 +794,93 @@ func getPostFromIPFS(ipfsHash string) (*Post, error) {
 }
 
 func ReactionHandler(w http.ResponseWriter, r *http.Request) {
-	log.Println("ReactionHandler invoked")
-
-	// Ensure the method is POST
 	if r.Method != http.MethodPost {
-		log.Printf("Invalid HTTP method: %s. Expected POST.", r.Method)
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Extract the post ID from the URL
+	// Parse the post ID from the URL
 	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 3 {
-		log.Println("Invalid URL format. Expected: /post/<postID>/react")
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
+	if len(parts) < 4 {
+		http.Error(w, "Invalid URL", http.StatusBadRequest)
 		return
 	}
-	postID := parts[2]
-	log.Printf("Post ID extracted: %s", postID)
+	postID := parts[2] // Corrected index to parts[3]
+
+	// Retrieve post hash using postID
 
 	// Parse the request body
-	var request ReactionRequest
+	var request struct {
+		UserPublicKey string `json:"userPublicKey"`
+		ReactionType  string `json:"reactionType"`
+	}
+
+	// Decode the request body and handle potential errors
 	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields() // Prevent unknown fields in JSON
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
-		log.Printf("Error decoding request body: %v", err)
 		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	log.Printf("Request parsed: UserPublicKey=%s, ReactionType=%s", request.UserPublicKey, request.ReactionType)
 
-	// Validate user public key
+	// Validate input fields
 	if request.UserPublicKey == "" {
-		log.Println("UserPublicKey is missing in the request")
 		http.Error(w, "User public key is required", http.StatusBadRequest)
 		return
 	}
 
 	// Validate reaction type
 	validReactions := map[string]bool{
-		"like":  true,
-		"love":  true,
-		"laugh": true,
-		"angry": true,
-		"sad":   true,
+		"like":      true,
+		"love":      true,
+		"laugh":     true,
+		"angry":     true,
+		"sad":       true,
+		"celebrate": true,
 	}
+
 	if !validReactions[request.ReactionType] {
-		log.Printf("Invalid ReactionType: %s", request.ReactionType)
 		http.Error(w, "Invalid reaction type", http.StatusBadRequest)
 		return
 	}
 
-	// Retrieve post hash using postID
 	postHash, err := getPostHashByID(postID)
 	if err != nil {
-		log.Printf("Failed to retrieve post hash for PostID=%s: %v", postID, err)
+		log.Printf("Failed to retrieve post hash: %v. PostID: %s", err, postID)
 		http.Error(w, "Post not found", http.StatusNotFound)
 		return
 	}
-	log.Printf("Post hash retrieved: %s", postHash)
 
-	// Retrieve the post from IPFS
+	// Add the reaction using the smart contract
+	log.Printf("Submitting transaction: AddReaction with PostHash: %s, UserPublicKey: %s, ReactionType: %s", postHash, request.UserPublicKey, request.ReactionType)
+	result, err := contract.SubmitTransaction("AddReaction", postHash, request.UserPublicKey, request.ReactionType)
+	if err != nil {
+		log.Printf("Failed to add reaction: %v. PostHash: %s, UserPublicKey: %s, ReactionType: %s", err, postHash, request.UserPublicKey, request.ReactionType)
+		http.Error(w, "Failed to add reaction: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Verify result is not empty
+	if len(result) == 0 {
+		log.Printf("Empty result from AddReaction transaction. PostHash: %s", postHash)
+		http.Error(w, "No response from reaction submission", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("AddReaction transaction successful. Result: %s", string(result))
+
+	// Get the updated post from IPFS
 	post, err := getPostFromIPFS(postHash)
 	if err != nil {
-		log.Printf("Failed to fetch post from IPFS. PostHash=%s, Error=%v", postHash, err)
-		http.Error(w, "Failed to retrieve post data", http.StatusInternalServerError)
+		log.Printf("Failed to get updated post from IPFS: %v. PostHash: %s", err, postHash)
+		http.Error(w, "Failed to retrieve updated post", http.StatusInternalServerError)
 		return
 	}
 
-	// Update the reaction for the user
-	if post.Reactions == nil {
-		post.Reactions = make(map[string]string)
-	}
-	oldReaction := post.Reactions[request.UserPublicKey]
-	post.Reactions[request.UserPublicKey] = request.ReactionType
-
-	// Recalculate reaction counts
-	if post.ReactionCounts == nil {
-		post.ReactionCounts = make(map[string]int)
-	}
-	if oldReaction != "" {
-		post.ReactionCounts[oldReaction]--
-	}
-	post.ReactionCounts[request.ReactionType]++
-	post.ReactionCount = len(post.Reactions)
-
-	log.Printf("Updated reactions for post %d: %+v", post.ID, post.ReactionCounts)
-
-	// Serialize the updated post to JSON and store it back in IPFS
-	postJSON, err := json.Marshal(post)
-	if err != nil {
-		log.Printf("Failed to marshal updated post. Error=%v", err)
-		http.Error(w, "Failed to update post data", http.StatusInternalServerError)
-		return
-	}
-
-	updatedIPFSHash, err := ipfsShell.Add(strings.NewReader(string(postJSON)))
-	if err != nil {
-		log.Printf("Failed to store updated post in IPFS. Error=%v", err)
-		http.Error(w, "Failed to store updated post in IPFS", http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("Updated post stored in IPFS with hash: %s", updatedIPFSHash)
-
-	// Respond with the updated post
+	// Return the updated post
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(post); err != nil {
-		log.Printf("Failed to encode updated post response. Error=%v", err)
+		log.Printf("Failed to encode post: %v. Post: %+v", err, post)
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
@@ -959,37 +936,38 @@ func getPostHashByID(postID string) (string, error) {
 
 // SearchUserByName searches the blockchain for a user by their name and retrieves their public key.
 func SearchUserByName(name string, contract *client.Contract) (string, error) {
-    // Query the blockchain for user details.
-    queryResult, err := contract.EvaluateTransaction("QueryUserByName", name)
-    if err != nil {
-        return "", fmt.Errorf("failed to query user: %v", err)
-    }
+	// Query the blockchain for user details.
+	queryResult, err := contract.EvaluateTransaction("QueryUserByName", name)
+	if err != nil {
+		return "", fmt.Errorf("failed to query user: %v", err)
+	}
 
-    // Parse the query result.
-    var user User
-    if err := json.Unmarshal(queryResult, &user); err != nil {
-        return "", fmt.Errorf("failed to unmarshal query result: %v", err)
-    }
+	// Parse the query result.
+	var user User
+	if err := json.Unmarshal(queryResult, &user); err != nil {
+		return "", fmt.Errorf("failed to unmarshal query result: %v", err)
+	}
 
-    if user.PublicKey == "" {
-        return "", fmt.Errorf("user not found or public key missing")
-    }
+	if user.PublicKey == "" {
+		return "", fmt.Errorf("user not found or public key missing")
+	}
 
-    return user.PublicKey, nil
+	return user.PublicKey, nil
 }
+
 // Message represents an individual message in a chat
 type Message struct {
-    IPFSHash   string    `json:"ipfsHash"`   // IPFS hash of the encrypted message
-    Signature  string    `json:"signature"`  // Signature for authenticity
-    Sender     string    `json:"sender"`     // Sender's public key
-    Receiver   string    `json:"receiver"`   // Receiver's public key
-    Timestamp  time.Time `json:"timestamp"`  // Time of message
+	IPFSHash  string    `json:"ipfsHash"`  // IPFS hash of the encrypted message
+	Signature string    `json:"signature"` // Signature for authenticity
+	Sender    string    `json:"sender"`    // Sender's public key
+	Receiver  string    `json:"receiver"`  // Receiver's public key
+	Timestamp time.Time `json:"timestamp"` // Time of message
 }
 
 // Chat represents a chat between two users
 type Chat struct {
-    Participants [2]string `json:"participants"` // Public keys of the two participants
-    Messages     []Message `json:"messages"`     // List of messages exchanged
+	Participants [2]string `json:"participants"` // Public keys of the two participants
+	Messages     []Message `json:"messages"`     // List of messages exchanged
 }
 
 // EncryptMessage encrypts plaintext using ECIES with AES-GCM
@@ -1052,7 +1030,7 @@ func EncryptMessage(plainText string, publicKey string) (string, error) {
 	// Combine ephemeral public key, nonce, and ciphertext
 	encryptedMessage := append(ephemeralPubKey, append(nonce, cipherText...)...)
 
-	log.Printf("Encrypted message length: %d", len(encryptedMessage))  // Add log to check length
+	log.Printf("Encrypted message length: %d", len(encryptedMessage)) // Add log to check length
 
 	return hex.EncodeToString(encryptedMessage), nil
 }
@@ -1134,420 +1112,659 @@ func DecryptMessage(encryptedText string, privateKey string) (string, error) {
 	return string(plainText), nil
 }
 
-
 func SignMessage(plainText string, privateKeyHex string) (string, error) {
-    // Decode the private key from hex
-    privKeyBytes, err := hex.DecodeString(privateKeyHex)
-    if err != nil {
-        return "", fmt.Errorf("invalid private key encoding: %v", err)
-    }
+	// Decode the private key from hex
+	privKeyBytes, err := hex.DecodeString(privateKeyHex)
+	if err != nil {
+		return "", fmt.Errorf("invalid private key encoding: %v", err)
+	}
 
-    // Parse the private key from DER format
-    privKey, err := x509.ParseECPrivateKey(privKeyBytes)
-    if err != nil {
-        return "", fmt.Errorf("invalid private key format: %v", err)
-    }
+	// Parse the private key from DER format
+	privKey, err := x509.ParseECPrivateKey(privKeyBytes)
+	if err != nil {
+		return "", fmt.Errorf("invalid private key format: %v", err)
+	}
 
-    // Compute the SHA-256 hash of the message
-    hash := sha256.Sum256([]byte(plainText))
-    
+	// Compute the SHA-256 hash of the message
+	hash := sha256.Sum256([]byte(plainText))
 
-    // Sign the hash using the private key
-    r, s, err := ecdsa.Sign(rand.Reader, privKey, hash[:])
-    if err != nil {
-        return "", fmt.Errorf("failed to sign message: %v", err)
-    }
+	// Sign the hash using the private key
+	r, s, err := ecdsa.Sign(rand.Reader, privKey, hash[:])
+	if err != nil {
+		return "", fmt.Errorf("failed to sign message: %v", err)
+	}
 
-   
-
-    // Encode the signature as "r,s"
-    return fmt.Sprintf("%s,%s", r.String(), s.String()), nil
+	// Encode the signature as "r,s"
+	return fmt.Sprintf("%s,%s", r.String(), s.String()), nil
 }
 
-
 func VerifySignature(plainText string, signature string, publicKeyHex string) (bool, error) {
-    // Decode the public key from hex
-	
-    pubKeyBytes, err := hex.DecodeString(publicKeyHex)
-    if err != nil {
-        return false, fmt.Errorf("invalid public key encoding: %v", err)
-    }
+	// Decode the public key from hex
 
-    // Parse the public key from DER format
-    pubKey, err := x509.ParsePKIXPublicKey(pubKeyBytes)
-    if err != nil {
-        return false, fmt.Errorf("invalid public key format: %v", err)
-    }
+	pubKeyBytes, err := hex.DecodeString(publicKeyHex)
+	if err != nil {
+		return false, fmt.Errorf("invalid public key encoding: %v", err)
+	}
 
-    // Assert the public key is of type ECDSA
-    ecdsaPubKey, ok := pubKey.(*ecdsa.PublicKey)
-    if !ok {
-        return false, fmt.Errorf("invalid public key type")
-    }
+	// Parse the public key from DER format
+	pubKey, err := x509.ParsePKIXPublicKey(pubKeyBytes)
+	if err != nil {
+		return false, fmt.Errorf("invalid public key format: %v", err)
+	}
 
-    // Compute the SHA-256 hash of the message
-    hash := sha256.Sum256([]byte(plainText))
-    
+	// Assert the public key is of type ECDSA
+	ecdsaPubKey, ok := pubKey.(*ecdsa.PublicKey)
+	if !ok {
+		return false, fmt.Errorf("invalid public key type")
+	}
 
-    // Split the signature into r and s
-    parts := strings.Split(signature, ",")
-    if len(parts) != 2 {
-        return false, fmt.Errorf("invalid signature format")
-    }
+	// Compute the SHA-256 hash of the message
+	hash := sha256.Sum256([]byte(plainText))
 
-    // Parse r and s as big integers
+	// Split the signature into r and s
+	parts := strings.Split(signature, ",")
+	if len(parts) != 2 {
+		return false, fmt.Errorf("invalid signature format")
+	}
+
+	// Parse r and s as big integers
 	r := new(big.Int)
 	r.SetString(parts[0], 10) // Assign r from the signature
 	s := new(big.Int)
 	s.SetString(parts[1], 10) // Properly assign s from the signature
-	
-	
 
-    // Verify the signature using the public key and hash
-    isValid := ecdsa.Verify(ecdsaPubKey, hash[:], r, s)
-    
+	// Verify the signature using the public key and hash
+	isValid := ecdsa.Verify(ecdsaPubKey, hash[:], r, s)
 
-    return isValid, nil
+	return isValid, nil
 }
-
-
 
 // UploadToIPFS uploads content to IPFS and returns the IPFS hash
 func UploadMessageToIPFS(content string) (string, error) {
-    sh := shell.NewShell("localhost:5001") // Ensure IPFS daemon is running on localhost:5001
-    hash, err := sh.Add(strings.NewReader(content))
-    if err != nil {
-        return "", err
-    }
-    return hash, nil
+	sh := shell.NewShell("localhost:5001") // Ensure IPFS daemon is running on localhost:5001
+	hash, err := sh.Add(strings.NewReader(content))
+	if err != nil {
+		return "", err
+	}
+	return hash, nil
 }
 func GenerateChatID(participants []string) string {
-    // Sort participants lexicographically (this makes the order consistent)
-    sort.Strings(participants)
+	// Sort participants lexicographically (this makes the order consistent)
+	sort.Strings(participants)
 
-    // Concatenate the sorted participant public keys into a single string
-    concatenated := strings.Join(participants, "")
+	// Concatenate the sorted participant public keys into a single string
+	concatenated := strings.Join(participants, "")
 
-    // Generate the chat ID using SHA-256 hash of the concatenated string
-    chatID := fmt.Sprintf("%x", sha256.Sum256([]byte(concatenated)))
-    return chatID
+	// Generate the chat ID using SHA-256 hash of the concatenated string
+	chatID := fmt.Sprintf("%x", sha256.Sum256([]byte(concatenated)))
+	return chatID
 }
 
-func SendMessage( chat *Chat, senderPrivateKey string, senderPublicKey string, receiverPublicKey string, plainText string, chatID string) error {
-    // Encrypt the message
-    encryptedMessage, err := EncryptMessage(plainText, receiverPublicKey)
-    if err != nil {
-        return fmt.Errorf("failed to encrypt message: %v", err)
-    }
+func SendMessage(chat *Chat, senderPrivateKey string, senderPublicKey string, receiverPublicKey string, plainText string, chatID string) error {
+	// Encrypt the message
+	encryptedMessage, err := EncryptMessage(plainText, receiverPublicKey)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt message: %v", err)
+	}
 
-    // Upload the encrypted message to IPFS
-    ipfsHash, err := UploadMessageToIPFS(encryptedMessage)
-    if err != nil {
-        return fmt.Errorf("failed to upload message to IPFS: %v", err)
-    }
+	// Upload the encrypted message to IPFS
+	ipfsHash, err := UploadMessageToIPFS(encryptedMessage)
+	if err != nil {
+		return fmt.Errorf("failed to upload message to IPFS: %v", err)
+	}
 
-    // Sign the original message
-    signature, err := SignMessage(plainText, senderPrivateKey)
-    if err != nil {
-        return fmt.Errorf("failed to sign message: %v", err)
-    }
+	// Sign the original message
+	signature, err := SignMessage(plainText, senderPrivateKey)
+	if err != nil {
+		return fmt.Errorf("failed to sign message: %v", err)
+	}
 
-    // Prepare the message object
-    message := Message{
-        IPFSHash:  ipfsHash,
-        Signature: signature,
-        Sender:    senderPublicKey,
-        Receiver:  receiverPublicKey,
-        Timestamp: time.Now(),
-    }
+	// Prepare the message object
+	message := Message{
+		IPFSHash:  ipfsHash,
+		Signature: signature,
+		Sender:    senderPublicKey,
+		Receiver:  receiverPublicKey,
+		Timestamp: time.Now(),
+	}
 
-    
+	// Generate a chat ID (e.g., hash of the participants)
+	// chatID := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(chat.Participants[:], ""))))
+	log.Printf("%s", chatID)
 
-    // Generate a chat ID (e.g., hash of the participants)
-    // chatID := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(chat.Participants[:], ""))))
-	log.Printf("%s",chatID)
+	// Add the message to the blockchain
+	err = AddMessageToBlockchain(chatID, message, senderPublicKey, receiverPublicKey)
+	if err != nil {
+		return fmt.Errorf("failed to add message to blockchain: %v", err)
+	}
 
-    // Add the message to the blockchain
-    err = AddMessageToBlockchain( chatID, message,senderPublicKey,receiverPublicKey)
-    if err != nil {
-        return fmt.Errorf("failed to add message to blockchain: %v", err)
-    }
-
-    return nil
+	return nil
 }
 func AddMessageToBlockchain(chatID string, message Message, senderPublicKey string, receiverPublicKey string) error {
-    // Convert the message to JSON
-    messageBytes, err := json.Marshal(message)
-    if err != nil {
-        return fmt.Errorf("failed to marshal message: %v", err)
-    }
+	// Convert the message to JSON
+	messageBytes, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("failed to marshal message: %v", err)
+	}
 
-    // Submit the transaction to the blockchain
-    result, err := contract.SubmitTransaction("AddMessage", chatID, string(messageBytes), senderPublicKey, receiverPublicKey)
-    if err != nil {
-        return fmt.Errorf("failed to submit transaction: %v", err)
-    }
+	// Submit the transaction to the blockchain
+	result, err := contract.SubmitTransaction("AddMessage", chatID, string(messageBytes), senderPublicKey, receiverPublicKey)
+	if err != nil {
+		return fmt.Errorf("failed to submit transaction: %v", err)
+	}
 
-    // Process the blockchain response (result)
-    // If the result is not empty, log it or handle it as necessary
-    if len(result) > 0 {
-        fmt.Printf("Blockchain response: %s\n", result)
-    } else {
-        fmt.Println("Transaction submitted successfully with no response.")
-    }
+	// Process the blockchain response (result)
+	// If the result is not empty, log it or handle it as necessary
+	if len(result) > 0 {
+		fmt.Printf("Blockchain response: %s\n", result)
+	} else {
+		fmt.Println("Transaction submitted successfully with no response.")
+	}
 
-    return nil
+	return nil
 }
-
-
 
 func FetchFromIPFS(ipfsHash string) (string, error) {
-    sh := shell.NewShell("localhost:5001") // Ensure IPFS daemon is running on localhost:5001
-    file, err := sh.Cat(ipfsHash)
-    if err != nil {
-        return "", fmt.Errorf("failed to fetch file from IPFS: %v", err)
-    }
+	sh := shell.NewShell("localhost:5001") // Ensure IPFS daemon is running on localhost:5001
+	file, err := sh.Cat(ipfsHash)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch file from IPFS: %v", err)
+	}
 
-    // Read the content from IPFS
-    content, err := io.ReadAll(file)
-    if err != nil {
-        return "", fmt.Errorf("failed to read content from IPFS: %v", err)
-    }
+	// Read the content from IPFS
+	content, err := io.ReadAll(file)
+	if err != nil {
+		return "", fmt.Errorf("failed to read content from IPFS: %v", err)
+	}
 
-    return string(content), nil
+	return string(content), nil
 }
 func DecryptAndFetchMessages(chatID string, senderPublicKey string, receiverPublicKey string, senderPrivateKey string, receiverPrivateKey string) ([]string, error) {
-    // Fetch the chat data from the blockchain using the chaincode
-    chat, err := GetChatFromBlockchain(chatID)
-    if err != nil {
-        return nil, fmt.Errorf("failed to fetch chat: %v", err)
-    }
+	// Fetch the chat data from the blockchain using the chaincode
+	chat, err := GetChatFromBlockchain(chatID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch chat: %v", err)
+	}
 
-    var decryptedMessages []string
+	var decryptedMessages []string
 
-    // For each message in the chat, fetch the IPFS content, decrypt it, and then verify its signature
-    for _, message := range chat.Messages {
-        // Fetch the encrypted message from IPFS
-        encryptedMessage, err := FetchFromIPFS(message.IPFSHash)
-        if err != nil {
-            return nil, fmt.Errorf("failed to fetch message from IPFS: %v", err)
-        }
+	// For each message in the chat, fetch the IPFS content, decrypt it, and then verify its signature
+	for _, message := range chat.Messages {
+		// Fetch the encrypted message from IPFS
+		encryptedMessage, err := FetchFromIPFS(message.IPFSHash)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch message from IPFS: %v", err)
+		}
 
+		// Determine which private key to use for decryption
+		var privateKeyToUse string
+		if message.Sender == senderPublicKey {
+			privateKeyToUse = receiverPrivateKey
+		} else {
+			privateKeyToUse = senderPrivateKey
+		}
 
-        // Determine which private key to use for decryption
-        var privateKeyToUse string
-        if message.Sender == senderPublicKey {
-            privateKeyToUse = receiverPrivateKey
-        } else {
-            privateKeyToUse = senderPrivateKey
-        }
+		// Decrypt the message using the chosen private key
+		decryptedMessage, err := DecryptMessage(encryptedMessage, privateKeyToUse)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt message: %v", err)
+		}
 
+		// Verify the decrypted message's signature
+		isValid, err := VerifySignature(decryptedMessage, message.Signature, message.Sender)
+		if err != nil || !isValid {
+			if err != nil {
+				log.Printf("Signature verification error: %v", err)
+			}
+			return nil, fmt.Errorf("signature verification failed for decrypted message: %s", decryptedMessage)
+		}
+		log.Printf("Signature verified for decrypted message: %s", decryptedMessage)
 
-        // Decrypt the message using the chosen private key
-        decryptedMessage, err := DecryptMessage(encryptedMessage, privateKeyToUse)
-        if err != nil {
-            return nil, fmt.Errorf("failed to decrypt message: %v", err)
-        }
+		// Add the decrypted message to the result
+		decryptedMessages = append(decryptedMessages, decryptedMessage)
+	}
 
-
-        // Verify the decrypted message's signature
-        isValid, err := VerifySignature(decryptedMessage, message.Signature, message.Sender)
-        if err != nil || !isValid {
-            if err != nil {
-                log.Printf("Signature verification error: %v", err)
-            }
-            return nil, fmt.Errorf("signature verification failed for decrypted message: %s", decryptedMessage)
-        }
-        log.Printf("Signature verified for decrypted message: %s", decryptedMessage)
-
-        // Add the decrypted message to the result
-        decryptedMessages = append(decryptedMessages, decryptedMessage)
-    }
-
-    return decryptedMessages, nil
+	return decryptedMessages, nil
 }
-
 
 func GetChatFromBlockchain(chatID string) (*Chat, error) {
-    // Query the blockchain for the chat data
-    result, err := contract.EvaluateTransaction("GetChat", chatID)
-    if err != nil {
-        return nil, fmt.Errorf("failed to fetch chat: %v", err)
-    }
+	// Query the blockchain for the chat data
+	result, err := contract.EvaluateTransaction("GetChat", chatID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch chat: %v", err)
+	}
 
-    // Unmarshal the result into a Chat object
-    var chat Chat
-    err = json.Unmarshal(result, &chat)
-    if err != nil {
-        return nil, fmt.Errorf("failed to unmarshal chat data: %v", err)
-    }
+	// Unmarshal the result into a Chat object
+	var chat Chat
+	err = json.Unmarshal(result, &chat)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal chat data: %v", err)
+	}
 
-    return &chat, nil
+	return &chat, nil
 }
-
-
 
 func ChatHandler(w http.ResponseWriter, r *http.Request) {
-    log.Println("ChatHandler invoked")
+	log.Println("ChatHandler invoked")
 
-    if r.Method != http.MethodPost {
-        log.Println("Invalid method. Only POST is allowed")
-        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-        return
-    }
+	if r.Method != http.MethodPost {
+		log.Println("Invalid method. Only POST is allowed")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-    log.Println("Reading raw request body")
-    body, _ := io.ReadAll(r.Body)
-    log.Printf("Raw request body: %s", string(body))
+	log.Println("Reading raw request body")
+	body, _ := io.ReadAll(r.Body)
+	log.Printf("Raw request body: %s", string(body))
 
-    log.Println("Parsing operation and username")
-    var baseReq struct {
-        Operation string `json:"operation"`
-        Username  string `json:"username"`
-    }
-    err := json.Unmarshal(body, &baseReq)
-    if err != nil || (baseReq.Operation != "send" && baseReq.Operation != "get") {
-        log.Println("Invalid operation or username specified")
-        http.Error(w, "invalid operation or username specified. Use 'send' or 'get'.", http.StatusBadRequest)
-        return
-    }
-    log.Printf("Operation: %s, Username: %s", baseReq.Operation, baseReq.Username)
+	log.Println("Parsing operation and username")
+	var baseReq struct {
+		Operation string `json:"operation"`
+		Username  string `json:"username"`
+	}
+	err := json.Unmarshal(body, &baseReq)
+	if err != nil || (baseReq.Operation != "send" && baseReq.Operation != "get") {
+		log.Println("Invalid operation or username specified")
+		http.Error(w, "invalid operation or username specified. Use 'send' or 'get'.", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Operation: %s, Username: %s", baseReq.Operation, baseReq.Username)
 
-    log.Println("Loading user keys")
-    userKeys, err := loadKeys(baseReq.Username)
-    if err != nil {
-        log.Printf("Failed to load keys for user %s: %v", baseReq.Username, err)
-        http.Error(w, fmt.Sprintf("failed to load keys for user %s: %v", baseReq.Username, err), http.StatusInternalServerError)
-        return
-    }
-   
-    log.Println("Resetting the request body for further parsing")
-    r.Body = io.NopCloser(bytes.NewBuffer(body))
+	log.Println("Loading user keys")
+	userKeys, err := loadKeys(baseReq.Username)
+	if err != nil {
+		log.Printf("Failed to load keys for user %s: %v", baseReq.Username, err)
+		http.Error(w, fmt.Sprintf("failed to load keys for user %s: %v", baseReq.Username, err), http.StatusInternalServerError)
+		return
+	}
 
-    if baseReq.Operation == "send" {
-        log.Println("Handling 'send' operation")
-        var sendReq struct {
-            ReceiverUsername string `json:"receiverUsername"`
-            PlainText        string `json:"plainText"`
-        }
+	log.Println("Resetting the request body for further parsing")
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
 
-        log.Println("Decoding 'send' request")
-        err := json.NewDecoder(r.Body).Decode(&sendReq)
-        if err != nil {
-            log.Println("Invalid request body for 'send'")
-            http.Error(w, "invalid request body for 'send'", http.StatusBadRequest)
-            return
-        }
-        log.Printf("ReceiverUsername: %s, PlainText: %s", sendReq.ReceiverUsername, sendReq.PlainText)
+	if baseReq.Operation == "send" {
+		log.Println("Handling 'send' operation")
+		var sendReq struct {
+			ReceiverUsername string `json:"receiverUsername"`
+			PlainText        string `json:"plainText"`
+		}
 
-        log.Println("Loading receiver's keys")
-        receiverKeys, err := loadKeys(sendReq.ReceiverUsername)
-        if err != nil {
-            log.Printf("Failed to load keys for receiver %s: %v", sendReq.ReceiverUsername, err)
-            http.Error(w, fmt.Sprintf("failed to load keys for receiver %s: %v", sendReq.ReceiverUsername, err), http.StatusInternalServerError)
-            return
-        }
-        
+		log.Println("Decoding 'send' request")
+		err := json.NewDecoder(r.Body).Decode(&sendReq)
+		if err != nil {
+			log.Println("Invalid request body for 'send'")
+			http.Error(w, "invalid request body for 'send'", http.StatusBadRequest)
+			return
+		}
+		log.Printf("ReceiverUsername: %s, PlainText: %s", sendReq.ReceiverUsername, sendReq.PlainText)
 
-        participants := []string{userKeys.PublicKey, receiverKeys.PublicKey}
-        chatID := GenerateChatID(participants)
-        log.Printf("Generated chat ID: %s", chatID)
+		log.Println("Loading receiver's keys")
+		receiverKeys, err := loadKeys(sendReq.ReceiverUsername)
+		if err != nil {
+			log.Printf("Failed to load keys for receiver %s: %v", sendReq.ReceiverUsername, err)
+			http.Error(w, fmt.Sprintf("failed to load keys for receiver %s: %v", sendReq.ReceiverUsername, err), http.StatusInternalServerError)
+			return
+		}
 
-        log.Println("Sending the message")
-        err = SendMessage(&Chat{}, userKeys.PrivateKey, userKeys.PublicKey, receiverKeys.PublicKey, sendReq.PlainText, chatID)
-        if err != nil {
-            log.Printf("Failed to send message: %v", err)
-            http.Error(w, fmt.Sprintf("failed to send message: %v", err), http.StatusInternalServerError)
-            return
-        }
-        log.Println("Message sent successfully")
+		participants := []string{userKeys.PublicKey, receiverKeys.PublicKey}
+		chatID := GenerateChatID(participants)
+		log.Printf("Generated chat ID: %s", chatID)
 
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]string{"status": "message sent successfully"})
-        return
-    }
+		log.Println("Sending the message")
+		err = SendMessage(&Chat{}, userKeys.PrivateKey, userKeys.PublicKey, receiverKeys.PublicKey, sendReq.PlainText, chatID)
+		if err != nil {
+			log.Printf("Failed to send message: %v", err)
+			http.Error(w, fmt.Sprintf("failed to send message: %v", err), http.StatusInternalServerError)
+			return
+		}
+		log.Println("Message sent successfully")
 
-    if baseReq.Operation == "get" {
-        log.Println("Handling 'get' operation")
-        var getReq struct {
-            SenderUsername string `json:"senderUsername"`
-        }
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "message sent successfully"})
+		return
+	}
 
-        log.Println("Decoding 'get' request")
-        err := json.NewDecoder(r.Body).Decode(&getReq)
-        if err != nil {
-            log.Println("Invalid request body for 'get'")
-            http.Error(w, "invalid request body for 'get'", http.StatusBadRequest)
-            return
-        }
-        log.Printf("SenderUsername: %s", getReq.SenderUsername)
+	if baseReq.Operation == "get" {
+		log.Println("Handling 'get' operation")
+		var getReq struct {
+			SenderUsername string `json:"senderUsername"`
+		}
 
-        log.Println("Loading sender's keys")
-        senderKeys, err := loadKeys(getReq.SenderUsername)
-        if err != nil {
-            log.Printf("Failed to load keys for sender %s: %v", getReq.SenderUsername, err)
-            http.Error(w, fmt.Sprintf("failed to load keys for sender %s: %v", getReq.SenderUsername, err), http.StatusInternalServerError)
-            return
-        }
-        log.Println("Sender's keys loaded successfully")
-        
-        participants := []string{userKeys.PublicKey, senderKeys.PublicKey}
-        chatID := GenerateChatID(participants)
-        log.Printf("Generated chat ID: %s", chatID)
+		log.Println("Decoding 'get' request")
+		err := json.NewDecoder(r.Body).Decode(&getReq)
+		if err != nil {
+			log.Println("Invalid request body for 'get'")
+			http.Error(w, "invalid request body for 'get'", http.StatusBadRequest)
+			return
+		}
+		log.Printf("SenderUsername: %s", getReq.SenderUsername)
 
-        log.Println("Fetching and decrypting messages")
-        decryptedMessages, err := DecryptAndFetchMessages(chatID, senderKeys.PublicKey, userKeys.PublicKey, senderKeys.PrivateKey, userKeys.PrivateKey)
-        if err != nil {
-            log.Printf("Failed to fetch chat messages: %v", err)
-            http.Error(w, fmt.Sprintf("failed to fetch chat messages: %v", err), http.StatusInternalServerError)
-            return
-        }
-        log.Println("Messages fetched and decrypted successfully %v",decryptedMessages)
+		log.Println("Loading sender's keys")
+		senderKeys, err := loadKeys(getReq.SenderUsername)
+		if err != nil {
+			log.Printf("Failed to load keys for sender %s: %v", getReq.SenderUsername, err)
+			http.Error(w, fmt.Sprintf("failed to load keys for sender %s: %v", getReq.SenderUsername, err), http.StatusInternalServerError)
+			return
+		}
+		log.Println("Sender's keys loaded successfully")
 
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(decryptedMessages)
-        return
-    }
+		participants := []string{userKeys.PublicKey, senderKeys.PublicKey}
+		chatID := GenerateChatID(participants)
+		log.Printf("Generated chat ID: %s", chatID)
 
-    log.Println("Invalid operation specified")
-    http.Error(w, "invalid operation", http.StatusInternalServerError)
+		log.Println("Fetching and decrypting messages")
+		decryptedMessages, err := DecryptAndFetchMessages(chatID, senderKeys.PublicKey, userKeys.PublicKey, senderKeys.PrivateKey, userKeys.PrivateKey)
+		if err != nil {
+			log.Printf("Failed to fetch chat messages: %v", err)
+			http.Error(w, fmt.Sprintf("failed to fetch chat messages: %v", err), http.StatusInternalServerError)
+			return
+		}
+		log.Println("Messages fetched and decrypted successfully %v", decryptedMessages)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(decryptedMessages)
+		return
+	}
+
+	log.Println("Invalid operation specified")
+	http.Error(w, "invalid operation", http.StatusInternalServerError)
 }
-
 
 // Helper function to load and parse keys from a file
 func loadKeys(username string) (struct {
-    PublicKey  string
-    PrivateKey string
+	PublicKey  string
+	PrivateKey string
 }, error) {
-    var keys struct {
-        PublicKey  string
-        PrivateKey string
-    }
+	var keys struct {
+		PublicKey  string
+		PrivateKey string
+	}
 
-    // Read the key file
-    keyFile := fmt.Sprintf("%s.key", username)
-    content, err := os.ReadFile(keyFile)
-    if err != nil {
-        return keys, fmt.Errorf("failed to read key file: %v", err)
-    }
+	// Read the key file
+	keyFile := fmt.Sprintf("%s.key", username)
+	content, err := os.ReadFile(keyFile)
+	if err != nil {
+		return keys, fmt.Errorf("failed to read key file: %v", err)
+	}
 
-    // Parse the content for keys
-    lines := strings.Split(string(content), "\n")
-    for _, line := range lines {
-        if strings.HasPrefix(line, "PublicKey:") {
-            keys.PublicKey = strings.TrimSpace(strings.TrimPrefix(line, "PublicKey:"))
-        } else if strings.HasPrefix(line, "PrivateKey:") {
-            keys.PrivateKey = strings.TrimSpace(strings.TrimPrefix(line, "PrivateKey:"))
-        }
-    }
+	// Parse the content for keys
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "PublicKey:") {
+			keys.PublicKey = strings.TrimSpace(strings.TrimPrefix(line, "PublicKey:"))
+		} else if strings.HasPrefix(line, "PrivateKey:") {
+			keys.PrivateKey = strings.TrimSpace(strings.TrimPrefix(line, "PrivateKey:"))
+		}
+	}
 
-    if keys.PublicKey == "" || keys.PrivateKey == "" {
-        return keys, fmt.Errorf("incomplete keys in file")
-    }
+	if keys.PublicKey == "" || keys.PrivateKey == "" {
+		return keys, fmt.Errorf("incomplete keys in file")
+	}
 
-    return keys, nil
+	return keys, nil
 }
 
+func CreateGroupHandler(w http.ResponseWriter, r *http.Request) {
+	var groupRequest struct {
+		Name    string   `json:"name"`
+		Members []string `json:"members"`
+	}
+
+	// Decode the request body
+	if err := json.NewDecoder(r.Body).Decode(&groupRequest); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
+	}
+
+	// Validate input
+	if groupRequest.Name == "" || len(groupRequest.Members) == 0 {
+		http.Error(w, "Group name and members are required", http.StatusBadRequest)
+		return
+	}
+
+	// Generate a unique group ID
+	groupID := fmt.Sprintf("group-%d", time.Now().UnixNano())
+
+	membersJSON, err := json.Marshal(groupRequest.Members)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to serialize members: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	_, err = contract.EvaluateTransaction("CreateGroup", groupID, groupRequest.Name, string(membersJSON))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create group on blockchain: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Prepare the response
+	newGroup := map[string]interface{}{
+		"id":      groupID,
+		"name":    groupRequest.Name,
+		"members": groupRequest.Members,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(newGroup)
+}
+
+func sendFriendRequestHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse the request body
+	var request struct {
+		SenderPublicKey   string `json:"senderPublicKey"`
+		ReceiverPublicKey string `json:"receiverPublicKey"`
+	}
+
+	// Decode the request body and handle potential errors
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Validate input fields
+	if request.SenderPublicKey == "" || request.ReceiverPublicKey == "" {
+		http.Error(w, "Sender and Receiver public keys are required", http.StatusBadRequest)
+		return
+	}
+
+	// Call the chaincode to send a friend request
+	result, err := contract.SubmitTransaction("SendFriendRequest", request.SenderPublicKey, request.ReceiverPublicKey)
+	if err != nil {
+		log.Printf("Failed to send friend request: %v", err)
+		http.Error(w, "Failed to send friend request", http.StatusInternalServerError)
+		return
+	}
+
+	// Verify result is not empty
+	if len(result) == 0 {
+		log.Printf("Empty result from SendFriendRequest transaction.")
+		http.Error(w, "No response from friend request submission", http.StatusInternalServerError)
+		return
+	}
+
+	// Return the result (request key) as confirmation
+	log.Printf("Friend request sent successfully, request key: %s", string(result))
+
+	// Respond with the request key
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"requestKey": string(result)}); err != nil {
+		log.Printf("Failed to encode response: %v", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
+
+	log.Println("Friend request successfully sent.")
+}
+
+func getFriendRequestsHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("inside the get friend req handler fun")
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse the user public key from the URL
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 3 {
+		http.Error(w, "Invalid URL", http.StatusBadRequest)
+		return
+	}
+	userPublicKey := parts[2]
+	log.Printf("user public key is:%s", userPublicKey)
+	// Retrieve friend requests for the user
+	log.Printf("Retrieving friend requests for user: %s", userPublicKey)
+
+	// Retrieve friend requests for the user from the chaincode
+	result, err := contract.SubmitTransaction("GetFriendRequestsByUser", userPublicKey)
+	if err != nil {
+		log.Printf("Failed to retrieve friend requests: %v", err)
+		http.Error(w, "Failed to retrieve friend requests: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Decode the base64 encoded result
+	decodedResult, err := base64.StdEncoding.DecodeString(string(result))
+	if err != nil {
+		log.Printf("Failed to decode friend requests: %v", err)
+		http.Error(w, "Failed to decode friend requests", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf(string(decodedResult))
+
+	// Parse the decoded JSON
+	var friendRequests []*FriendRequest
+	err = json.Unmarshal(decodedResult, &friendRequests)
+	if err != nil {
+		log.Printf("Failed to unmarshal friend requests: %v", err)
+		http.Error(w, "Failed to process friend requests", http.StatusInternalServerError)
+		return
+	}
+
+	// Return the friend requests with sender names
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(friendRequests); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+func respondToFriendRequestHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse the request body
+	var request struct {
+		SenderPublicKey   string `json:"senderPublicKey"`
+		ReceiverPublicKey string `json:"receiverPublicKey"`
+		Response          string `json:"response"` // "accepted" or "rejected"
+	}
+
+	// Decode the request body and handle potential errors
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Validate input fields
+	if request.SenderPublicKey == "" || request.ReceiverPublicKey == "" || request.Response == "" {
+		http.Error(w, "Sender, receiver public keys and response are required", http.StatusBadRequest)
+		return
+	}
+
+	// Submit the response to the friend request
+	log.Printf("Submitting transaction: RespondToFriendRequest with Sender: %s, Receiver: %s, Response: %s", request.SenderPublicKey, request.ReceiverPublicKey, request.Response)
+
+	// result, err := contract.SubmitTransaction("RespondToFriendRequest", request.SenderPublicKey, request.ReceiverPublicKey, request.Response)
+	// if err != nil {
+	// 	log.Printf("Failed to respond to friend request: %v", err)
+	// 	http.Error(w, "Failed to respond to friend request: "+err.Error(), http.StatusInternalServerError)
+	// 	return
+	// }
+
+	// // Handle result
+	// if len(result) == 0 {
+	// 	log.Printf("Empty result from RespondToFriendRequest transaction. Sender: %s, Receiver: %s", request.SenderPublicKey, request.ReceiverPublicKey)
+	// 	http.Error(w, "No response from friend request response submission", http.StatusInternalServerError)
+	// 	return
+	// }
+
+	// log.Printf("Friend request response submitted successfully. Result: %s", string(result))
+
+	// // Respond with a success message
+	// w.Header().Set("Content-Type", "application/json")
+	// w.WriteHeader(http.StatusOK)
+	// response := map[string]string{"message": "Friend request response submitted successfully"}
+	// if err := json.NewEncoder(w).Encode(response); err != nil {
+	// 	http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	// }
+	log.Printf("Responding to friend request - Sender: %s, Receiver: %s, Response: %s",
+		request.SenderPublicKey, request.ReceiverPublicKey, request.Response)
+
+	result, err := contract.SubmitTransaction("RespondToFriendRequest",
+		request.SenderPublicKey, request.ReceiverPublicKey, request.Response)
+	if err != nil {
+		log.Printf("Failed to respond to friend request: %v", err)
+		http.Error(w, "Failed to respond to friend request: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Log the result of the transaction
+	log.Printf("Friend request response transaction result: %s", string(result))
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	response := map[string]string{
+		"message": "Friend request " + request.Response,
+		"result":  string(result),
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+// Handler to get the friends of a specific user
+func getFriendsHandler(w http.ResponseWriter, r *http.Request) {
+	log.Println("Inside getFriendsHandler")
+
+	// Ensure it's a GET request
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract the public key of the user from the URL using Gorilla Mux
+	vars := mux.Vars(r)
+	userPublicKey := vars["id"]
+	log.Printf("Fetching friends for user: %s", userPublicKey)
+
+	// Call chaincode to retrieve the user's friends with details
+	friendsJSON, err := contract.SubmitTransaction("GetFriendsWithDetailsByUser", userPublicKey)
+	if err != nil {
+		log.Printf("Failed to retrieve friends with details: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to retrieve friends: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Decode the friends list JSON (optional validation)
+	var friendsList []map[string]string
+	err = json.Unmarshal(friendsJSON, &friendsList)
+	if err != nil {
+		log.Printf("Failed to decode friends list: %v", err)
+		http.Error(w, "Failed to process friends list", http.StatusInternalServerError)
+		return
+	}
+
+	// Send the friends list as JSON
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(friendsJSON)
+}
 
 func main() {
 
@@ -1555,7 +1772,6 @@ func main() {
 	if err := initFabric(); err != nil {
 		log.Fatalf("Error initializing Fabric: %v", err)
 	}
-	ipfsShell = shell.NewShell("localhost:5001")
 
 	// Register handlers
 	r := mux.NewRouter()
@@ -1566,9 +1782,14 @@ func main() {
 	r.HandleFunc("/post/{id}/react", ReactionHandler).Methods("POST")
 	r.HandleFunc("/users", GetAllUsersHandler).Methods("GET")
 	r.HandleFunc("/chat", ChatHandler)
-	//r.HandleFunc("/getchat", GetChatMessagesHandler)
-    
-	
+	r.HandleFunc("/groups", CreateGroupHandler).Methods("POST")
+	// r.HandleFunc("/usergroups", UserGroupHandler).Methods("GET")
+	// r.HandleFunc("/getchat", GetChatMessagesHandler)
+	r.HandleFunc("/friend-request/send", sendFriendRequestHandler).Methods("POST")
+	r.HandleFunc("/friend-requests/{id}", getFriendRequestsHandler).Methods("GET")
+	r.HandleFunc("/friend-request/respond", respondToFriendRequestHandler).Methods("POST")
+	r.HandleFunc("/friends/{id}", getFriendsHandler).Methods("GET")
+
 	// Apply CORS middleware
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{"*"}, // Replace with specific domains for production
@@ -1583,4 +1804,4 @@ func main() {
 	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
-
+}
