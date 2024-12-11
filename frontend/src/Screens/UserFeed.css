@@ -1,142 +1,213 @@
-.user-feed-container {
+:root {
+    --primary-color: #3498db;
+    --secondary-color: #2ecc71;
+    --background-color: #f5f7fa;
+    --card-background: #ffffff;
+    --text-color: #333333;
+    --text-light: #666666;
+    --border-color: #e0e0e0;
+    --shadow-color: rgba(0, 0, 0, 0.1);
+  }
+  
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--background-color);
+    color: var(--text-color);
+    line-height: 1.6;
+  }
+  
+  .user-feed-container {
     max-width: 800px;
     margin: 0 auto;
     padding: 20px;
-}
-
-h1 {
+  }
+  
+  h1 {
     text-align: center;
-    color: #333;
-}
-
-.posts-container {
+    color: var(--primary-color);
+    font-size: 2.5rem;
+    margin-bottom: 30px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+  
+  .posts-container {
     display: flex;
     flex-direction: column;
-    gap: 20px;
-}
-
-.post-card {
-    background-color: #fff;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    padding: 15px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.post-card h3 {
-    margin-top: 0;
-    color: #444;
-}
-
-.post-card p {
-    color: #666;
-}
-
-.reactions {
+    gap: 30px;
+  }
+  
+  .post-card {
+    background-color: var(--card-background);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 6px var(--shadow-color);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+  }
+  
+  .post-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 6px 12px var(--shadow-color);
+  }
+  
+  .post-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-top: 10px;
-}
-
-.reaction-button, .share-button {
-    background-color: #f0f0f0;
+    margin-bottom: 15px;
+  }
+  
+  .post-card h3 {
+    margin: 0;
+    color: var(--primary-color);
+    font-size: 1.2rem;
+  }
+  
+  .post-date {
+    color: var(--text-light);
+    font-size: 0.9rem;
+  }
+  
+  .post-card p {
+    color: var(--text-color);
+    font-size: 1rem;
+    margin-bottom: 15px;
+  }
+  
+  .post-image, .post-video {
+    width: 100%;
+    max-height: 400px;
+    object-fit: contain;
+    border-radius: 8px;
+    margin-bottom: 15px;
+  }
+  
+  .reactions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 15px;
+  }
+  
+  .reaction-button, .share-button {
+    background-color: var(--primary-color);
+    color: white;
     border: none;
-    padding: 5px 10px;
-    border-radius: 4px;
+    padding: 8px 15px;
+    border-radius: 20px;
     cursor: pointer;
-    transition: background-color 0.3s;
-}
-
-.reaction-button:hover, .share-button:hover {
-    background-color: #e0e0e0;
-}
-
-/* New styles for the popup */
-.share-popup {
+    transition: background-color 0.3s, transform 0.2s;
+    font-size: 0.9rem;
+    font-weight: bold;
+  }
+  
+  .reaction-button:hover, .share-button:hover {
+    background-color: darken(var(--primary-color), 10%);
+    transform: scale(1.05);
+  }
+  
+  .share-popup {
     position: fixed;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background-color: white;
-    padding: 20px;
-    border-radius: 10px;
-    box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
-    width: 300px;
-    max-height: 400px;
+    background-color: var(--card-background);
+    padding: 25px;
+    border-radius: 15px;
+    box-shadow: 0 10px 20px var(--shadow-color);
+    width: 350px;
+    max-height: 80vh;
     overflow-y: auto;
     animation: fadeIn 0.3s ease;
-}
-
-@keyframes fadeIn {
+  }
+  
+  @keyframes fadeIn {
     from {
-        opacity: 0;
-        transform: translate(-50%, -60%);
+      opacity: 0;
+      transform: translate(-50%, -60%);
     }
     to {
-        opacity: 1;
-        transform: translate(-50%, -50%);
+      opacity: 1;
+      transform: translate(-50%, -50%);
     }
-}
-
-.share-popup h3 {
-    margin: 0 0 15px 0;
+  }
+  
+  .share-popup h3 {
+    margin: 0 0 20px 0;
     text-align: center;
-    color: #444;
-    font-size: 18px;
-}
-
-.user-list {
+    color: var(--primary-color);
+    font-size: 1.5rem;
+  }
+  
+  .user-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-}
-
-.user-item {
+    gap: 15px;
+  }
+  
+  .user-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 10px;
-    background-color: #f3efef;
-    border-radius: 5px;
+    padding: 12px 15px;
+    background-color: var(--background-color);
+    border-radius: 8px;
     transition: background-color 0.2s;
-}
-
-.user-item span {
-    color: #000000;
-}
-
-.user-item button {
-    background-color: #007bff;
+  }
+  
+  .user-item:hover {
+    background-color: darken(var(--background-color), 5%);
+  }
+  
+  .user-item span {
+    color: var(--text-color);
+    font-weight: 500;
+  }
+  
+  .user-item button {
+    background-color: var(--secondary-color);
     color: white;
     border: none;
-    padding: 5px 10px;
-    border-radius: 4px;
+    padding: 6px 12px;
+    border-radius: 15px;
     cursor: pointer;
-    transition: background-color 0.3s;
-    margin-left: auto; /* Moves share button towards the right */
-}
-
-.user-item button:hover {
-    background-color: #0056b3;
-}
-
-/* Center the close button */
-.close-button {
-    display: block; /* Make it a block element for centering */
-    margin: 15px auto 0; /* Centering the close button */
-    background-color: #ff4d4d;
+    transition: background-color 0.3s, transform 0.2s;
+    font-size: 0.9rem;
+    font-weight: bold;
+  }
+  
+  .user-item button:hover {
+    background-color: darken(var(--secondary-color), 10%);
+    transform: scale(1.05);
+  }
+  
+  .close-button {
+    display: block;
+    margin: 20px auto 0;
+    background-color: #e74c3c;
     color: white;
     border: none;
-    padding: 8px 16px;
-    border-radius: 4px;
+    padding: 10px 20px;
+    border-radius: 20px;
     cursor: pointer;
-    transition: background-color 0.3s;
-    width: 80%; /* Optional: set a width for the button */
-    text-align: center; /* Center text inside the button */
-}
-
-.close-button:hover {
-    background-color: #e60000;
-}
-
+    transition: background-color 0.3s, transform 0.2s;
+    width: 80%;
+    text-align: center;
+    font-size: 1rem;
+    font-weight: bold;
+  }
+  
+  .close-button:hover {
+    background-color: darken(#e74c3c, 10%);
+    transform: scale(1.05);
+  }
+  
+  .loading {
+    text-align: center;
+    font-size: 1.2rem;
+    color: var(--primary-color);
+    margin-top: 50px;
+  }
+  
+  
