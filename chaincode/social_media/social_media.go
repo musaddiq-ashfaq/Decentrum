@@ -18,14 +18,6 @@ type User struct {
 	PublicKey string `json:"publicKey"`
 }
 
-//	type Post struct {
-//		UserPublicKey     string            `json:"userPublicKey"`
-//		ContentCID    string            `json:"contentCID"`
-//		Timestamp     int64             `json:"timestamp"`
-//		Reactions     map[string]string `json:"reactions"`
-//		ReactionCount int               `json:"reactionCount"`
-//		ShareCount    int                `json:"shareCount"`
-//	}
 type Post struct {
 	ID            string            `json:"id"`
 	UserPublicKey string            `json:"userPublicKey"`
@@ -53,8 +45,20 @@ type Chat struct {
 // Group represents a group structure in the blockchain
 type Group struct {
 	ID      string   `json:"id"`
-	Name    string   `json:"name"`
+	GroupName    string   `json:"groupname"`
 	Members []string `json:"members"`
+}
+
+type GroupMessage struct {
+	IPFSHash   string `json:"ipfsHash"`
+	Signature  string `json:"signature"`
+	Sender     string `json:"sender"`
+	Receiver[]   string `json:"receiver"`
+	Timestamp  string `json:"timestamp"`
+}
+type GroupChat struct {
+    Participants []string `json:"participants"` // Public keys of the two participants
+    GroupMessages  []GroupMessage `json:"groupmessages"`     // List of messages exchanged
 }
 
 // SmartContract defines the chaincode structure
@@ -553,67 +557,161 @@ func (s *SmartContract) GetAllUsers(ctx contractapi.TransactionContextInterface)
 	return users, nil
 }
 
-func (s *SmartContract) CreateGroup(ctx contractapi.TransactionContextInterface, id string, name string, members []string) error {
-	// Check if the group already exists
-	exists, err := s.GroupExists(ctx, id)
-	if err != nil {
-		return fmt.Errorf("failed to check if group exists: %v", err)
-	}
-	if exists {
-		return fmt.Errorf("group with ID %s already exists", id)
-	}
+// CreateGroup creates a new group with the given name and members
+func (s *SmartContract) CreateGroup(ctx contractapi.TransactionContextInterface, id string, groupname string, members []string) error {
+    // Check if the group already exists
+    exists, err := s.GroupExists(ctx, id)
+    if err != nil {
+        return fmt.Errorf("failed to check if group exists: %v", err)
+    }
+    if exists {
+        return fmt.Errorf("group with ID %s already exists", id)
+    }
 
-	// Create the group object
-	group := Group{
-		ID:      id,
-		Name:    name,
-		Members: members,
-	}
+    // Validate input
+    if len(members) == 0 {
+        return fmt.Errorf("group must have at least one member")
+    }
 
-	// Serialize the group to JSON
-	groupJSON, err := json.Marshal(group)
-	if err != nil {
-		return fmt.Errorf("failed to serialize group: %v", err)
-	}
+    // Validate user names
+    for _, userName := range members {
+        if userName == "" {
+            return fmt.Errorf("empty user name is not allowed")
+        }
+        // Optional: Add additional validation for user names
+    }
 
-	// Store the group on the blockchain
-	err = ctx.GetStub().PutState(id, groupJSON)
-	if err != nil {
-		return fmt.Errorf("failed to put group state: %v", err)
-	}
+    // Create the group object
+    group := Group{
+        ID:      id,
+        GroupName:    groupname,
+        Members: members, // Now expects user names
+    }
 
-	return nil
+    // Serialize the group to JSON
+    groupJSON, err := json.Marshal(group)
+    if err != nil {
+        return fmt.Errorf("failed to serialize group: %v", err)
+    }
+
+    // Store the group on the blockchain
+    err = ctx.GetStub().PutState(id, groupJSON)
+    if err != nil {
+        return fmt.Errorf("failed to put group state: %v", err)
+    }
+
+    return nil
 }
 
 // ReadGroup retrieves a group from the blockchain by its ID
 func (s *SmartContract) ReadGroup(ctx contractapi.TransactionContextInterface, id string) (*Group, error) {
-	// Get the group JSON from the blockchain
-	groupJSON, err := ctx.GetStub().GetState(id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read group: %v", err)
-	}
-	if groupJSON == nil {
-		return nil, fmt.Errorf("group with ID %s does not exist", id)
-	}
 
-	// Deserialize the group JSON
-	var group Group
-	err = json.Unmarshal(groupJSON, &group)
-	if err != nil {
-		return nil, fmt.Errorf("failed to deserialize group: %v", err)
-	}
+    // Get the group JSON from the blockchain
+    groupJSON, err := ctx.GetStub().GetState(id)
+    if err != nil {
+        return nil, fmt.Errorf("failed to read group: %v", err)
+    }
+    if groupJSON == nil {
+        return nil, fmt.Errorf("group with ID %s does not exist", id)
+    }
 
-	return &group, nil
+    // Deserialize the group JSON
+    var group Group
+    err = json.Unmarshal(groupJSON, &group)
+    if err != nil {
+        return nil, fmt.Errorf("failed to deserialize group: %v", err)
+    }
+
+    return &group, nil
 }
 
 // GroupExists checks if a group exists on the blockchain
 func (s *SmartContract) GroupExists(ctx contractapi.TransactionContextInterface, id string) (bool, error) {
-	groupJSON, err := ctx.GetStub().GetState(id)
-	if err != nil {
-		return false, fmt.Errorf("failed to read group: %v", err)
-	}
+      groupJSON, err := ctx.GetStub().GetState(id)
+    if err != nil {
+        return false, fmt.Errorf("failed to read group: %v", err)
+    }
 
-	return groupJSON != nil, nil
+    return groupJSON != nil, nil
+}
+
+// AddMemberToGroup adds a new user's name to an existing group
+func (s *SmartContract) AddMemberToGroup(ctx contractapi.TransactionContextInterface, id string, userName string) error {
+    // Retrieve the existing group
+    group, err := s.ReadGroup(ctx, id)
+    if err != nil {
+        return err
+    }
+
+    // Check if the user name already exists
+    for _, existingMember := range group.Members {
+        if existingMember == userName {
+            return fmt.Errorf("user name already exists in the group")
+        }
+    }
+
+    // Add the new user name
+    group.Members = append(group.Members, userName)
+
+    // Serialize the updated group
+    groupJSON, err := json.Marshal(group)
+    if err != nil {
+        return fmt.Errorf("failed to serialize updated group: %v", err)
+    }
+
+    // Update the group on the blockchain
+    err = ctx.GetStub().PutState(id, groupJSON)
+    if err != nil {
+        return fmt.Errorf("failed to update group: %v", err)
+    }
+
+    return nil
+}
+
+// GetAllGroups retrieves all groups from the ledger
+func (s *SmartContract) GetAllGroups(ctx contractapi.TransactionContextInterface) ([]*Group, error) {
+    // Initialize a slice to store all groups
+    var allGroups []*Group
+
+    // Fetch all records from the ledger
+    resultsIterator, err := ctx.GetStub().GetStateByRange("", "")
+    if err != nil {
+        return nil, fmt.Errorf("failed to get state by range: %v", err)
+    }
+    defer resultsIterator.Close()
+
+    // Iterate through all records
+    for resultsIterator.HasNext() {
+        queryResponse, err := resultsIterator.Next()
+        if err != nil {
+            return nil, fmt.Errorf("failed to iterate query results: %v", err)
+        }
+
+        // Deserialize each record into a Group struct
+        var group Group
+        err = json.Unmarshal(queryResponse.Value, &group)
+        if err != nil {
+            return nil, fmt.Errorf("failed to deserialize group: %v", err)
+        }
+
+        // Skip empty or null groups (you can adjust the condition as needed)
+        if group.ID == "" || len(group.Members) == 0 {
+            continue
+        }
+
+        // Add the group to the result
+        allGroups = append(allGroups, &group)
+    }
+
+    // Log the retrieved groups as JSON for better readability
+    jsonGroups, err := json.Marshal(allGroups)
+    if err != nil {
+        log.Printf("Failed to marshal groups: %v", err)
+    } else {
+        log.Printf("Retrieved groups: %s", string(jsonGroups))
+    }
+
+    return allGroups, nil
 }
 
 // SendFriendRequest creates a new friend request

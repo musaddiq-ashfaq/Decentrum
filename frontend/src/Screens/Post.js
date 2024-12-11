@@ -1,12 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  AlertCircle,
-  CheckCircle2,
-  Loader2,
-  LogOut,
-  Send,
-} from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, LogOut, Send, Image, Video } from 'lucide-react';
+import Navbar from "./Navbar";
 import "./Userpost.css";
 
 const Alert = ({ children, className, ...props }) => (
@@ -107,11 +102,11 @@ const CreatePost = () => {
     setStatus("loading");
 
     const formData = new FormData();
-    formData.append("user.name",currentUser.name)
+    formData.append("user.name", currentUser.name)
     formData.append("content", content.trim());
     formData.append("wallet.publicKey", wallet.publicKey);
-    if (image) formData.append("photo", image); // Match backend field name
-    if (video) formData.append("video", video); // Match backend field name
+    if (image) formData.append("photo", image);
+    if (video) formData.append("video", video);
 
     try {
       const response = await fetch("http://localhost:8081/post", {
@@ -141,75 +136,97 @@ const CreatePost = () => {
   };
 
   return (
-    <div className="max-w-2xl mx-auto p-4 space-y-4">
-      <div className="flex justify-end">
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-2 px-4 py-2 text-red-600 hover:text-red-700 transition-colors"
-        >
-          <LogOut className="h-4 w-4" />
-          Logout
-        </button>
-      </div>
+    <div className="bg-gradient-animation min-h-screen flex flex-col">
+      <Navbar />
+      <div className="flex-grow flex items-center justify-center p-4">
+        <div className="max-w-2xl w-full bg-white rounded-xl shadow-lg p-6 space-y-6">
+          <div className="flex justify-between items-center">
+            <h2 className="text-3xl font-bold text-[#052a47]">Create Post</h2>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 px-4 py-2 text-red-600 hover:text-red-700 transition-colors rounded-full hover:bg-red-50"
+            >
+              <LogOut className="h-5 w-5" />
+              Logout
+            </button>
+          </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="What's on your mind?"
-          className="w-full p-4 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none min-h-[120px]"
-          maxLength={1000}
-        />
-        <div className="flex gap-4">
-          <input
-            type="file"
-            accept="image/*"
-            onChange={handleImageChange}
-            disabled={!!video}
-          />
-          <input
-            type="file"
-            accept="video/*"
-            onChange={handleVideoChange}
-            disabled={!!image}
-          />
-        </div>
-        <button
-          type="submit"
-          className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 flex items-center gap-2"
-          disabled={status === "loading"}
-        >
-          {status === "loading" ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Posting...
-            </>
-          ) : (
-            <>
-              <Send className="h-4 w-4" />
-              Post
-            </>
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="relative">
+              <textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder="What's on your mind?"
+                className="w-full p-4 border-2 border-[#4dbf38] rounded-lg focus:ring-2 focus:ring-[#80d12a] focus:border-transparent resize-none min-h-[150px] transition-all duration-300 ease-in-out"
+                maxLength={1000}
+              />
+              <span className="absolute bottom-3 right-3 text-sm text-gray-400">
+                {content.length}/1000
+              </span>
+            </div>
+            <div className="flex gap-4">
+              <label className="flex-1 flex items-center justify-center p-4 border-2 border-dashed border-[#4dbf38] rounded-lg cursor-pointer hover:bg-[#f0fdf4] transition-colors duration-300">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageChange}
+                  disabled={!!video}
+                  className="hidden"
+                />
+                <Image className="h-6 w-6 mr-2 text-[#4dbf38]" />
+                <span className="text-[#052a47]">{image ? 'Change Image' : 'Add Image'}</span>
+              </label>
+              <label className="flex-1 flex items-center justify-center p-4 border-2 border-dashed border-[#4dbf38] rounded-lg cursor-pointer hover:bg-[#f0fdf4] transition-colors duration-300">
+                <input
+                  type="file"
+                  accept="video/*"
+                  onChange={handleVideoChange}
+                  disabled={!!image}
+                  className="hidden"
+                />
+                <Video className="h-6 w-6 mr-2 text-[#4dbf38]" />
+                <span className="text-[#052a47]">{video ? 'Change Video' : 'Add Video'}</span>
+              </label>
+            </div>
+            <button
+              type="submit"
+              className="w-full bg-[#4dbf38] text-white px-6 py-3 rounded-lg hover:bg-[#80d12a] flex items-center justify-center gap-2 transition-colors duration-300"
+              disabled={status === "loading"}
+            >
+              {status === "loading" ? (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  Posting...
+                </>
+              ) : (
+                <>
+                  <Send className="h-5 w-5" />
+                  Post
+                </>
+              )}
+            </button>
+          </form>
+
+          {status === "success" && (
+            <Alert className="bg-green-50 border-green-200">
+              <CheckCircle2 className="h-5 w-5 text-green-500" />
+              <AlertTitle>Success!</AlertTitle>
+              <AlertDescription>Your post was created successfully.</AlertDescription>
+            </Alert>
           )}
-        </button>
-      </form>
 
-      {status === "success" && (
-        <Alert className="bg-green-50 border-green-200">
-          <CheckCircle2 className="h-4 w-4 text-green-500" />
-          <AlertTitle>Success!</AlertTitle>
-          <AlertDescription>Your post was created successfully.</AlertDescription>
-        </Alert>
-      )}
-
-      {status === "error" && (
-        <Alert className="bg-red-50 border-red-200">
-          <AlertCircle className="h-4 w-4 text-red-500" />
-          <AlertTitle>Error</AlertTitle>
-          <AlertDescription>{errorMessage}</AlertDescription>
-        </Alert>
-      )}
+          {status === "error" && (
+            <Alert className="bg-red-50 border-red-200">
+              <AlertCircle className="h-5 w-5 text-red-500" />
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{errorMessage}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
 
 export default CreatePost;
+

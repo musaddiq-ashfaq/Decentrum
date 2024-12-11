@@ -1,15 +1,8 @@
 import React, { useState } from "react";
-import {
-  ThumbsUp,
-  Heart,
-  Laugh,
-  Angry,
-  Frown,
-} from "lucide-react";
-import "./PostReactions.css"; // Optional for additional styling
+import { ThumbsUp, Heart, Laugh, Angry, Frown } from 'lucide-react';
 
 const reactions = {
-  like: { icon: ThumbsUp, color: "text-blue-500", label: "Like" },
+  like: { icon: ThumbsUp, color: "text-[#052a47]", label: "Like" },
   love: { icon: Heart, color: "text-red-500", label: "Love" },
   laugh: { icon: Laugh, color: "text-yellow-500", label: "Haha" },
   angry: { icon: Angry, color: "text-orange-500", label: "Angry" },
@@ -57,47 +50,44 @@ const PostReactions = ({ post, currentUser, onReactionUpdate }) => {
   const totalReactions = post.reactionCount || 0;
 
   return (
-    <div className="post-reactions-container">
-      {error && <div className="error-message">{error}</div>}
+    <div className="relative">
+      {error && <div className="text-red-500 text-sm mb-2">{error}</div>}
 
       <button
         onClick={() => setShowReactionPicker(!showReactionPicker)}
-        className="reaction-button"
+        className="flex items-center text-gray-500 hover:text-[#4dbf38]"
       >
         {currentReaction ? (
           <>
             {React.createElement(reactions[currentReaction].icon, {
-              className: reactions[currentReaction].color,
+              className: `h-5 w-5 mr-1 ${reactions[currentReaction].color}`,
             })}
-            {reactions[currentReaction].label}
+            <span>{reactions[currentReaction].label}</span>
           </>
         ) : (
           <>
-            <ThumbsUp className="text-gray-500" />
-            React
+            <ThumbsUp className="h-5 w-5 mr-1" />
+            <span>React</span>
           </>
         )}
       </button>
 
       {totalReactions > 0 && (
-        <span className="total-reactions">{totalReactions} Reactions</span>
+        <span className="text-sm text-gray-500 ml-2">{totalReactions} Reactions</span>
       )}
 
       {showReactionPicker && (
-        <div className="reaction-picker">
-          {Object.entries(reactions).map(
-            ([type, { icon: Icon, color, label }]) => (
-              <button
-                key={type}
-                onClick={() => handleReaction(type)}
-                className="reaction-option"
-                title={label}
-              >
-                <Icon className={color} />
-                {label}
-              </button>
-            )
-          )}
+        <div className="absolute bottom-full left-0 mb-2 bg-white rounded-lg shadow-md p-2 flex space-x-2">
+          {Object.entries(reactions).map(([type, { icon: Icon, color, label }]) => (
+            <button
+              key={type}
+              onClick={() => handleReaction(type)}
+              className="p-2 rounded-full hover:bg-gray-100 transition-colors duration-200"
+              title={label}
+            >
+              <Icon className={`h-6 w-6 ${color}`} />
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -105,3 +95,4 @@ const PostReactions = ({ post, currentUser, onReactionUpdate }) => {
 };
 
 export default PostReactions;
+
